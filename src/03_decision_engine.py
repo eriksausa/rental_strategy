@@ -11,8 +11,8 @@ import numpy as np
 # CFE Domestic High-Consumption (DAC) tariff constants in Quintana Roo
 CFE_DAC_THRESHOLD_KWH = 400.0
 CFE_DAC_BASE_RATE_MXN = 6.08
-CFE_IVA_MULTIPLIER = 1.00
-DEFAULT_MONTE_CARLO_RUNS = 1000
+CFE_IVA_MULTIPLIER = 1.16
+DEFAULT_MONTE_CARLO_RUNS = 5000
 
 
 @dataclass

@@ -48,7 +48,7 @@ def chronological_train_test_split(
     leak into training features.
     """
     df_sorted = df.sort_values("year_month").reset_index(drop=True)
-    train_df = df_sorted[df_sorted["year_month"] < cutoff_year_month].copy()
+    train_df = df_sorted[df_sorted["year_month"] <= cutoff_year_month].copy()
     test_df = df_sorted[df_sorted["year_month"] > cutoff_year_month].copy()
     if train_df.empty or test_df.empty:
         raise ValueError(f"Chronological split at {cutoff_year_month} produced an empty partition.")
