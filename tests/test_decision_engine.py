@@ -55,7 +55,7 @@ class TestRentalStrategyOptimizer(unittest.TestCase):
             is_summer_month=True,
         )
         self.assertGreaterEqual(be_occ, 0.0)
-        self.assertGreater(be_occ, 1.0)
+        self.assertEqual(be_occ, 1.0)
 
     def test_monte_carlo_summer_lease_recommendation(self):
         costs = engine.UserCostInputs(

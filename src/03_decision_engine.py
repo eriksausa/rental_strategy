@@ -77,7 +77,7 @@ def compute_break_even_occupancy(
     target_gross_contribution = monthly_lease_offer_mxn + cfe_bill
     required_nights = target_gross_contribution / net_rev_per_occupied_night
     raw_occ = required_nights / float(days_in_month)
-    return round(float(raw_occ), 4)
+    return float(np.clip(raw_occ, 0.0, 1.0))
 
 
 def simulate_lease_vs_str(
