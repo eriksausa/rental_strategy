@@ -37,8 +37,8 @@ PORTFOLIO_UNITS: Dict[str, Dict[str, object]] = {
         "notes_es": "A pasos de la 5ta Av. y la playa; demanda constante de nómadas digitales y turistas.",
     },
     "CB_PDC_1BR_B": {
-        "name_en": "Playa del Carmen — 1BR/1BA #B (Gonzalo Guerrero)",
-        "name_es": "Playa del Carmen — 1 Rec / 1 Baño #B (Gonzalo Guerrero)",
+        "name_en": "Playa del Carmen — 1BR/1BA #B (Centro)",
+        "name_es": "Playa del Carmen — 1 Rec / 1 Baño #B (Centro)",
         "city": "Playa del Carmen",
         "neighborhood": "Gonzalo Guerrero",
         "bedrooms": 1,
@@ -395,20 +395,20 @@ with top_col1:
     if lang == "es":
         st.title("🏖️ Casa Bella — Optimizador de Estrategia de Renta")
         st.caption(
-            "**Proyecto de Portafolio de Ciencia de Datos y Machine Learning · Demo Interactivo de Decisiones Inmobiliarias (Riviera Maya y CDMX)**"
+            "**Demo Interactivo de Decisiones Inmobiliarias (Riviera Maya y CDMX)**"
         )
     else:
         st.title("🏖️ Casa Bella — Rental Strategy Optimizer")
         st.caption(
-            "**Personal Data Science & Machine Learning Portfolio Project · Interactive Decision Engine Demo (Riviera Maya & CDMX)**"
+            "**Interactive Decision Engine Demo (Riviera Maya & CDMX)**"
         )
 
 # Highlight Banner: What This Project Is & What It Does
 if lang == "es":
     st.info(
-        "🎯 **Sobre Este Proyecto de Portafolio (Demo Interactivo):** "
+        "🎯 **Sobre Este Proyecto (Demo Interactivo):** "
         "Construí este motor de decisiones de extremo a extremo (**SQL $\\rightarrow$ Machine Learning $\\rightarrow$ Simulación Monte Carlo $\\rightarrow$ Streamlit**) "
-        "para resolver un problema real en el negocio familiar (**Casa Bella**, con 3 departamentos en **Playa del Carmen** y 1 en **Tulum**): "
+        "para resolver un problema real en el negocio (**Casa Bella**, con 3 departamentos en **Playa del Carmen** y 1 en **Tulum**): "
         "*cuando un inquilino ofrece un contrato fijo de 3 o 6 meses, ¿debemos aceptar la oferta hoy, negociar una renta más alta o dejar el calendario abierto "
         "para rentas cortas por Airbnb y grupos de Facebook?* A diferencia de calculadoras simples, este modelo incorpora la **tarifa eléctrica CFE DAC de verano** "
         "(donde el aire acondicionado eleva el recibo a `$5,500–$6,500 MXN/mes`), la mezcla de reservas directas sin comisión en **Grupos de Facebook (0%)** vs. **Airbnb (~18%)**, "
@@ -416,9 +416,9 @@ if lang == "es":
     )
 else:
     st.info(
-        "🎯 **About This Portfolio Project (Interactive Demo):** "
+        "🎯 **About This Project (Interactive Demo):** "
         "I built this end-to-end decision engine (**SQL $\\rightarrow$ Machine Learning $\\rightarrow$ Monte Carlo Simulation $\\rightarrow$ Streamlit**) "
-        "to solve a real operational question for our family rental business (**Casa Bella**, operating 3 apartments in **Playa del Carmen** and 1 in **Tulum**): "
+        "to solve a real operational question for a rental business (**Casa Bella**, operating 3 apartments in **Playa del Carmen** and 1 in **Tulum**): "
         "*when a prospective tenant offers a guaranteed 3-month or 6-month lease, should we accept the contract today, negotiate a higher rate, or keep the calendar open "
         "for short-term stays across Airbnb and Facebook Groups?* Unlike basic revenue calculators, this engine models Quintana Roo's **May–Oct CFE DAC summer electricity trap** "
         "(`$5,500–$6,500 MXN/mo` in A/C bills paid by the host on short-term stays vs. paid by the tenant on a lease), blends **0%-fee Facebook Group direct bookings** with **Airbnb (~18% fee)**, "
