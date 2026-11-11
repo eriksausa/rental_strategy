@@ -391,17 +391,50 @@ with top_col2:
     )
 lang = "es" if lang_choice == "Español" else "en"
 
+st.markdown(
+    """
+    <style>
+    .header-title {
+        font-size: 3.2rem !important;
+        line-height: 1.15;
+        margin-bottom: 0.25rem;
+    }
+    .header-caption {
+        font-size: 1.2rem !important;
+        line-height: 1.6;
+        color: #6b7280;
+        margin-top: 0;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 with top_col1:
     if lang == "es":
-        st.title("🏖️ Casa Bella — Optimizador de Estrategia de Renta")
-        st.caption(
-            "**Demo Interactivo de Decisiones Inmobiliarias (Riviera Maya y CDMX)**"
+        st.markdown(
+            "<h1 class='header-title'>🏖️ Casa Bella — Optimizador de Estrategia de Renta</h1>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<div class='header-caption'><strong>Creado por Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.</strong><br>"
+            "<em>Maestría en Ciencias en Telecomunicaciones · Licenciatura en Ingeniería Eléctrica y Tecnologías de la Información (TU Wien)</em><br>"
+            "<strong>🚧 Demo Interactivo de Decisiones Inmobiliarias (Riviera Maya y CDMX)</strong></div>",
+            unsafe_allow_html=True,
         )
     else:
-        st.title("🏖️ Casa Bella — Rental Strategy Optimizer")
-        st.caption(
-            "**Interactive Decision Engine Demo (Riviera Maya & CDMX)**"
+        st.markdown(
+            "<h1 class='header-title'>🏖️ Casa Bella — Rental Strategy Optimizer</h1>",
+            unsafe_allow_html=True,
         )
+        st.markdown(
+            "<div class='header-caption'><strong>Created by Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.</strong><br>"
+            "<em>Master of Science in Telecommunications · Bachelor of Science in Electrical Engineering and Information Technology (TU Wien)</em><br>"
+            "<strong>🚧 Interactive Decision Engine Demo (Riviera Maya & CDMX)</strong></div>",
+            unsafe_allow_html=True,
+        )
+
+
 
 # Highlight Banner: What This Project Is & What It Does
 if lang == "es":
@@ -463,6 +496,23 @@ month_map = MONTH_NAMES_ES if lang == "es" else MONTH_NAMES_EN
 unit_labels = [str(PORTFOLIO_UNITS[k][name_key]) for k in unit_keys]
 
 with st.sidebar:
+    st.markdown("### 👨‍💻 Created By")
+    if lang == "es":
+        st.markdown(
+            """
+            **Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.**
+            - 🎓 **Maestría en Ciencias en Telecomunicaciones** *(TU Wien)*
+            - 🎓 **Licenciatura en Ingeniería Eléctrica y Tecnología de la Información** *(TU Wien)*
+            - 💼 **Científico de Datos & Ingeniero de ML** """
+        )
+    else:    
+        st.markdown(
+        """
+        **Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.**
+        - 🎓 **Master of Science in Telecommunications** *(TU Wien)*
+        - 🎓 **Bachelor of Science in Electrical Engineering and Information Technology** *(TU Wien)*
+        - 💼 **Data Scientist & ML Engineer** """
+                )
     st.header("1. Unidad y Oferta" if lang == "es" else "1. Apartment & Lease Offer")
     selected_label = st.selectbox(
         "Seleccionar Propiedad" if lang == "es" else "Select Property",
