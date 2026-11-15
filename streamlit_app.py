@@ -2,382 +2,56 @@
 Rental Strategy Optimizer (Playa del Carmen, Tulum & CDMX)
 Bilingual (English / Español) Portfolio Demo & Interactive Decision Engine
 
+Single entry point — imports all domain assumptions, CFE 12-month rolling DAC
+billing, ML forecasting models, and Monte Carlo simulation from `src.rental_engine`.
+
 Run locally with:
-    streamlit run app.py
+    streamlit run streamlit_app.py
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-import re
-from typing import Dict, List
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-
-# ==============================================================================
-# 1. Domain Constants & Portfolio Units (Zero Hidden Cost Assumptions)
-# ==============================================================================
-CFE_DAC_THRESHOLD_KWH = 400.0
-CFE_DAC_BASE_RATE_MXN = 6.08
-CFE_IVA_MULTIPLIER = 1.16
-
-PORTFOLIO_UNITS: Dict[str, Dict[str, object]] = {
-    "UNIT_A_PLAYA": {
-        "name_en": "Unit A Playa — 1BR/1BA",
-        "name_es": "Unidad A Playa — 1 Rec / 1 Baño",
-        "city": "Playa del Carmen",
-        "neighborhood": "Not disclosed",
-        "bedrooms": 1,
-        "bathrooms": 1,
-        "base_adr_mxn": 1650.0,
-        "occ_multiplier": 1.00,
-        "notes_en": "Central location; steady year-round digital nomad + tourist mix.",
-        "notes_es": "Ubicación céntrica; demanda constante de nómadas digitales y turistas.",
-    },
-    "UNIT_B_PLAYA": {
-        "name_en": "Unit B Playa — 1BR/1BA",
-        "name_es": "Unidad B Playa — 1 Rec / 1 Baño",
-        "city": "Playa del Carmen",
-        "neighborhood": "Not disclosed",
-        "bedrooms": 1,
-        "bathrooms": 1,
-        "base_adr_mxn": 1750.0,
-        "occ_multiplier": 1.02,
-        "notes_en": "Quiet residential/nomad zone; strong Facebook Group mid-term rental demand.",
-        "notes_es": "Zona residencial tranquila; alta demanda de rentas de mediano plazo en grupos de Facebook.",
-    },
-    "UNIT_C_PLAYA": {
-        "name_en": "Unit C Playa — 2BR/2BA",
-        "name_es": "Unidad C Playa — 2 Rec / 2 Baños",
-        "city": "Playa del Carmen",
-        "neighborhood": "Not disclosed",
-        "bedrooms": 2,
-        "bathrooms": 2,
-        "base_adr_mxn": 2550.0,
-        "occ_multiplier": 0.98,
-        "notes_en": "Higher winter ADR ceiling; multiple A/C units increase May–Oct CFE DAC exposure.",
-        "notes_es": "Mayor tarifa por noche en invierno; múltiples aires acondicionados elevan el riesgo de tarifa CFE DAC en verano.",
-    },
-    "UNIT_TULUM": {
-        "name_en": "Unit Tulum — 1BR/1BA",
-        "name_es": "Unidad Tulum — 1 Rec / 1 Baño",
-        "city": "Tulum",
-        "neighborhood": "Not disclosed",
-        "bedrooms": 1,
-        "bathrooms": 1,
-        "base_adr_mxn": 1550.0,
-        "occ_multiplier": 0.74,
-        "notes_en": "Calibrated to Tulum market-wide occupancy (~46%, AirDNA); sharp May–Oct low-season compression.",
-        "notes_es": "Calibrado a la ocupación promedio del mercado de Tulum (~46%, AirDNA); fuerte caída en temporada baja (mayo–octubre).",
-    },
-    "MKT_CDMX_1BR": {
-        "name_en": "CDMX Benchmark — 1BR/1BA (Roma Norte)",
-        "name_es": "Benchmark CDMX — 1 Rec / 1 Baño (Roma Norte)",
-        "city": "CDMX",
-        "neighborhood": "Roma Norte",
-        "bedrooms": 1,
-        "bathrooms": 1,
-        "base_adr_mxn": 1850.0,
-        "occ_multiplier": 1.08,
-        "notes_en": "Urban comparison market (~66% annual occupancy, minimal summer A/C utility drag).",
-        "notes_es": "Mercado urbano de comparación (~66% ocupación anual, sin gasto elevado de aire acondicionado).",
-    },
-}
-
-MONTH_NAMES_EN = {
-    1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
-    7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec",
-}
-
-MONTH_NAMES_ES = {
-    1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
-    7: "Jul", 8: "Ago", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic",
-}
-
-BASE_SEASONAL_OCC_CURVE = {
-    1: 0.82, 2: 0.80, 3: 0.76, 4: 0.68, 5: 0.48, 6: 0.44,
-    7: 0.55, 8: 0.50, 9: 0.36, 10: 0.42, 11: 0.64, 12: 0.80,
-}
-
-BASE_SEASONAL_ADR_MULT = {
-    1: 1.30, 2: 1.25, 3: 1.20, 4: 1.05, 5: 0.82, 6: 0.78,
-    7: 0.92, 8: 0.88, 9: 0.74, 10: 0.78, 11: 1.02, 12: 1.28,
-}
+from src.rental_engine.assumptions import (
+    AIRDNA_PUBLIC_BENCHMARKS,
+    CFE_TARIFF_DAC_LIMITS_KWH,
+    DEFAULT_ASSUMPTIONS,
+    MONTH_NAMES_EN,
+    MONTH_NAMES_ES,
+    PORTFOLIO_UNITS,
+)
+from src.rental_engine.cfe import evaluate_12m_dac_trajectory
+from src.rental_engine.data import load_training_dataframe
+from src.rental_engine.engine import (
+    UserCostInputs,
+    simulate_lease_vs_str,
+)
+from src.rental_engine.fb_parser import parse_facebook_rental_post
+from src.rental_engine.models import (
+    TrainedModelBundle,
+    predict_unit_monthly_forecasts,
+    train_and_evaluate_models,
+)
 
 
-@dataclass
-class UserCostInputs:
-    unit_id: str
-    contract_months: int
-    monthly_lease_offer_mxn: float
-    hoa_monthly_mxn: float
-    wifi_gas_water_monthly_mxn: float
-    cleaning_cost_per_stay_mxn: float
-    avg_stay_nights: float
-    airbnb_fee_pct: float
-    facebook_direct_share: float
-    winter_cfe_monthly_mxn: float
-    summer_cfe_monthly_mxn: float
-
-
-def compute_blended_ota_drag(airbnb_fee_pct: float, facebook_direct_share: float) -> float:
-    fb_share = float(np.clip(facebook_direct_share, 0.0, 1.0))
-    ota_fee = float(np.clip(airbnb_fee_pct, 0.0, 0.50))
-    return round((1.0 - fb_share) * ota_fee, 4)
-
-
-def compute_break_even_occupancy(
-    adr_mxn: float,
-    monthly_lease_offer_mxn: float,
-    costs: UserCostInputs,
-    is_summer_month: bool,
-    days_in_month: int = 30,
-) -> float:
-    blended_fee = compute_blended_ota_drag(costs.airbnb_fee_pct, costs.facebook_direct_share)
-    cleaning_per_occupied_night = costs.cleaning_cost_per_stay_mxn / max(costs.avg_stay_nights, 1.0)
-    net_rev_per_occupied_night = adr_mxn * (1.0 - blended_fee) - cleaning_per_occupied_night
-    if net_rev_per_occupied_night <= 0:
-        return 1.0
-
-    cfe_bill = costs.summer_cfe_monthly_mxn if is_summer_month else costs.winter_cfe_monthly_mxn
-    target_gross_contribution = monthly_lease_offer_mxn + cfe_bill
-    required_nights = target_gross_contribution / net_rev_per_occupied_night
-    raw_occ = required_nights / float(days_in_month)
-    return float(np.clip(raw_occ, 0.0, 1.0))
-
-
-def build_unit_monthly_forecasts(unit_id: str, months_window: List[int], lang: str = "en") -> List[Dict[str, float]]:
-    profile = PORTFOLIO_UNITS[unit_id]
-    base_adr = float(profile["base_adr_mxn"])
-    occ_mult = float(profile["occ_multiplier"])
-    city = str(profile["city"])
-    month_map = MONTH_NAMES_ES if lang == "es" else MONTH_NAMES_EN
-
-    forecasts = []
-    for m in months_window:
-        if city == "CDMX":
-            adr_mult = 1.15 if m in (10, 11, 3, 4) else 0.98
-            occ_rate = float(np.clip(0.64 * (1.08 if m in (10, 11) else 0.98), 0.45, 0.85))
-        else:
-            adr_mult = BASE_SEASONAL_ADR_MULT[m]
-            occ_rate = float(np.clip(BASE_SEASONAL_OCC_CURVE[m] * occ_mult, 0.22, 0.92))
-
-        forecasts.append(
-            {
-                "month_num": int(m),
-                "month_name": month_map[int(m)],
-                "pred_adr_mxn": round(base_adr * adr_mult, 2),
-                "pred_occ_rate": round(occ_rate, 4),
-                "adr_std_mxn": round(base_adr * 0.11, 2),
-                "occ_std": 0.075,
-            }
-        )
-    return forecasts
-
-
-def run_monte_carlo_simulation(
-    monthly_forecasts: List[Dict[str, float]],
-    costs: UserCostInputs,
-    lang: str = "en",
-    n_simulations: int = 5000,
-    random_seed: int = 42,
-) -> Dict[str, object]:
-    rng = np.random.default_rng(random_seed)
-    n_months = len(monthly_forecasts)
-
-    monthly_fixed_owner_costs = costs.hoa_monthly_mxn + costs.wifi_gas_water_monthly_mxn
-    lease_monthly_net = costs.monthly_lease_offer_mxn - monthly_fixed_owner_costs
-    lease_total_net_mxn = float(n_months * lease_monthly_net)
-
-    blended_fee = compute_blended_ota_drag(costs.airbnb_fee_pct, costs.facebook_direct_share)
-    cleaning_per_night = costs.cleaning_cost_per_stay_mxn / max(costs.avg_stay_nights, 1.0)
-
-    sim_str_totals = np.zeros(n_simulations, dtype=float)
-    monthly_breakdown = []
-
-    for m in monthly_forecasts:
-        month_num = int(m["month_num"])
-        is_summer = month_num in (5, 6, 7, 8, 9, 10)
-        cfe_bill = costs.summer_cfe_monthly_mxn if is_summer else costs.winter_cfe_monthly_mxn
-
-        adr_samples = np.maximum(
-            rng.normal(loc=m["pred_adr_mxn"], scale=m["adr_std_mxn"], size=n_simulations),
-            350.0,
-        )
-        occ_samples = np.clip(
-            rng.normal(loc=m["pred_occ_rate"], scale=m["occ_std"], size=n_simulations),
-            0.05,
-            0.98,
-        )
-
-        occupied_nights = 30.0 * occ_samples
-        gross_rev = occupied_nights * adr_samples
-        platform_fees = gross_rev * blended_fee
-        cleaning_total = occupied_nights * cleaning_per_night
-        month_net_str = gross_rev - platform_fees - cleaning_total - monthly_fixed_owner_costs - cfe_bill
-        sim_str_totals += month_net_str
-
-        be_occ = compute_break_even_occupancy(
-            adr_mxn=m["pred_adr_mxn"],
-            monthly_lease_offer_mxn=costs.monthly_lease_offer_mxn,
-            costs=costs,
-            is_summer_month=is_summer,
-        )
-
-        if lang == "es":
-            season_label = (
-                "Verano (Riesgo CFE DAC)" if is_summer else ("Invierno Alta" if month_num in (12, 1, 2, 3, 4) else "Media")
-            )
-            monthly_breakdown.append(
-                {
-                    "Mes": m["month_name"],
-                    "Temporada": season_label,
-                    "ADR Predicho (MXN)": m["pred_adr_mxn"],
-                    "Ocupación Predicha (%)": round(m["pred_occ_rate"] * 100, 1),
-                    "Ocupación Equilibrio (%)": round(be_occ * 100, 1),
-                    "Recibo CFE Renta Corta (MXN)": cfe_bill,
-                    "Neto Renta Corta Esperado (MXN)": round(float(np.mean(month_net_str)), 0),
-                    "Neto Contrato Garantizado (MXN)": round(lease_monthly_net, 0),
-                }
-            )
-        else:
-            season_label = (
-                "Summer (CFE DAC Risk)" if is_summer else ("High Winter" if month_num in (12, 1, 2, 3, 4) else "Shoulder")
-            )
-            monthly_breakdown.append(
-                {
-                    "Month": m["month_name"],
-                    "Season": season_label,
-                    "Pred ADR (MXN)": m["pred_adr_mxn"],
-                    "Pred Occ (%)": round(m["pred_occ_rate"] * 100, 1),
-                    "Break-Even Occ (%)": round(be_occ * 100, 1),
-                    "STR CFE Bill (MXN)": cfe_bill,
-                    "Expected STR Net (MXN)": round(float(np.mean(month_net_str)), 0),
-                    "Guaranteed Lease Net (MXN)": round(lease_monthly_net, 0),
-                }
-            )
-
-    p10_str = float(np.percentile(sim_str_totals, 10))
-    p50_str = float(np.percentile(sim_str_totals, 50))
-    p90_str = float(np.percentile(sim_str_totals, 90))
-    mean_str = float(np.mean(sim_str_totals))
-
-    cutoff_5pct = np.percentile(sim_str_totals, 5)
-    cvar_5pct = float(np.mean(sim_str_totals[sim_str_totals <= cutoff_5pct]))
-    prob_str_beats_lease = float(np.mean(sim_str_totals > lease_total_net_mxn))
-
-    indifference_monthly_rent_mxn = (mean_str / max(n_months, 1)) + monthly_fixed_owner_costs
-    be_col = "Ocupación Equilibrio (%)" if lang == "es" else "Break-Even Occ (%)"
-    mean_be_occ = round(float(np.mean([r[be_col] for r in monthly_breakdown])), 1)
-
-    if lease_total_net_mxn >= p50_str and prob_str_beats_lease < 0.45:
-        rec_code = "ACCEPT"
-        counter_offer_mxn = costs.monthly_lease_offer_mxn
-        if lang == "es":
-            recommendation = "ACEPTAR CONTRATO DE ARRENDAMIENTO"
-            rationale = (
-                f"El contrato garantizado de {n_months} meses genera **${lease_total_net_mxn:,.0f} MXN netos** "
-                f"(el inquilino paga la luz CFE directamente), superando el escenario mediano de renta corta "
-                f"(**${p50_str:,.0f} MXN**) sin riesgo de noches vacías ni cobros excesivos de tarifa CFE DAC en verano."
-            )
-        else:
-            recommendation = "ACCEPT CONTRACT"
-            rationale = (
-                f"The guaranteed {n_months}-month lease nets **${lease_total_net_mxn:,.0f} MXN** "
-                f"(tenant pays CFE electricity directly), beating the median short-term scenario "
-                f"(**${p50_str:,.0f} MXN**) with zero vacancy or summer CFE DAC bill shock."
-            )
-    elif prob_str_beats_lease > 0.65:
-        rec_code = "OPEN"
-        counter_offer_mxn = round(indifference_monthly_rent_mxn * 1.05, -2)
-        if lang == "es":
-            recommendation = "MANTENER CALENDARIO ABIERTO (AIRBNB / FACEBOOK DIRECTO)"
-            rationale = (
-                f"La renta corta supera esta oferta en el **{prob_str_beats_lease * 100:.1f}%** de las 5,000 simulaciones Monte Carlo "
-                f"(Mediana Renta Corta: **${p50_str:,.0f} MXN** vs. Contrato: **${lease_total_net_mxn:,.0f} MXN**). "
-                f"Solo conviene firmar contrato si el inquilino sube su oferta al menos a **${counter_offer_mxn:,.0f} MXN/mes**."
-            )
-        else:
-            recommendation = "KEEP CALENDAR OPEN (STR / FB DIRECT)"
-            rationale = (
-                f"Short-term stays beat this lease offer in **{prob_str_beats_lease * 100:.1f}%** of 5,000 Monte Carlo runs "
-                f"(Median STR Net: **${p50_str:,.0f} MXN** vs. Lease Net: **${lease_total_net_mxn:,.0f} MXN**). "
-                f"Only sign a lease if the tenant raises their offer to at least **${counter_offer_mxn:,.0f} MXN/month**."
-            )
-    else:
-        rec_code = "NEGOTIATE"
-        counter_offer_mxn = round(max(indifference_monthly_rent_mxn, costs.monthly_lease_offer_mxn * 1.05), -2)
-        if lang == "es":
-            recommendation = "NEGOCIAR RENTA MENSUAL MÁS ALTA"
-            rationale = (
-                f"Los flujos esperados están muy parejos (renta corta gana en el **{prob_str_beats_lease * 100:.1f}%** de las corridas), "
-                f"pero la renta corta conlleva riesgo a la baja (5% CVaR: **${cvar_5pct:,.0f} MXN**). "
-                f"Haz una contraoferta de **${counter_offer_mxn:,.0f} MXN/mes** (+ CFE pagado por el inquilino) para asegurar ganancia sin riesgo."
-            )
-        else:
-            recommendation = "NEGOTIATE HIGHER LEASE RATE"
-            rationale = (
-                f"Expected cash flows are close (STR wins in **{prob_str_beats_lease * 100:.1f}%** of runs), "
-                f"but short-term carries downside risk (5% CVaR: **${cvar_5pct:,.0f} MXN**). "
-                f"Counter-offer at **${counter_offer_mxn:,.0f} MXN/month** (+ CFE paid by tenant) to lock in guaranteed profit."
-            )
-
-    return {
-        "sim_str_totals": sim_str_totals,
-        "monthly_df": pd.DataFrame(monthly_breakdown),
-        "lease_total_net_mxn": round(lease_total_net_mxn, 2),
-        "str_expected_net_mxn": round(mean_str, 2),
-        "str_p10_net_mxn": round(p10_str, 2),
-        "str_p50_net_mxn": round(p50_str, 2),
-        "str_p90_net_mxn": round(p90_str, 2),
-        "str_cvar_5pct_mxn": round(cvar_5pct, 2),
-        "prob_str_beats_lease": round(prob_str_beats_lease, 4),
-        "mean_break_even_occupancy": mean_be_occ,
-        "indifference_monthly_rent_mxn": round(indifference_monthly_rent_mxn, 0),
-        "blended_platform_fee_pct": blended_fee,
-        "rec_code": rec_code,
-        "recommendation": recommendation,
-        "rationale": rationale,
-        "suggested_counter_offer_mxn": float(counter_offer_mxn),
-    }
-
-
-def parse_facebook_rental_post(raw_text: str) -> Dict[str, object]:
-    text_lower = raw_text.lower()
-    bedrooms = 1
-    br_match = re.search(r"(\d)\s*(?:br|bed|rec[aá]mara|habitaci[oó]n)", text_lower)
-    if br_match:
-        bedrooms = int(br_match.group(1))
-
-    neighborhood = "Unknown"
-    for zone in ("gonzalo guerrero", "centro", "la veleta", "aldea zama", "roma norte", "condesa"):
-        if zone in text_lower:
-            neighborhood = zone.title()
-            break
-
-    price_mxn = None
-    price_match = re.search(r"\$?\s*(\d{2}[,\.]?\d{3})\s*(?:mxn|pesos|/mes|monthly)?", text_lower)
-    if price_match:
-        price_mxn = float(price_match.group(1).replace(",", "").replace(".", ""))
-
-    tenant_pays_cfe = any(
-        kw in text_lower for kw in ("+ cfe", "plus cfe", "mas cfe", "más cfe", "plus electric", "no incluye luz")
-    )
-    return {
-        "bedrooms": bedrooms,
-        "neighborhood": neighborhood,
-        "asking_monthly_mxn": price_mxn,
-        "tenant_pays_cfe": tenant_pays_cfe,
-    }
+@st.cache_resource(show_spinner=False)
+def get_trained_model_bundle() -> TrainedModelBundle:
+    """
+    Loads the synthetic SQLite panel and fits the Seasonal Median Baseline,
+    Random Forest, and XGBoost models with a strict chronological split
+    (train <= 2025-06, test > 2025-06). Cached across reruns.
+    """
+    df = load_training_dataframe()
+    return train_and_evaluate_models(df, cutoff_year_month="2025-06")
 
 
 # ==============================================================================
-# 2. Page Header, Language Switcher (EN / ES) & Portfolio Project Showcase Banner
+# 1. Page Header, Language Switcher (EN / ES) & Demo Disclaimer Banner
 # ==============================================================================
 st.set_page_config(
-    page_title="Rental Strategy Optimizer",
+    page_title="Rental Strategy Optimizer — Riviera Maya & CDMX",
     page_icon="🏖️",
     layout="wide",
 )
@@ -395,12 +69,12 @@ st.markdown(
     """
     <style>
     .header-title {
-        font-size: 3.2rem !important;
+        font-size: 3.0rem !important;
         line-height: 1.15;
         margin-bottom: 0.25rem;
     }
     .header-caption {
-        font-size: 1.2rem !important;
+        font-size: 1.15rem !important;
         line-height: 1.6;
         color: #6b7280;
         margin-top: 0;
@@ -419,7 +93,7 @@ with top_col1:
         st.markdown(
             "<div class='header-caption'><strong>Creado por Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.</strong><br>"
             "<em>Maestría en Ciencias en Telecomunicaciones · Licenciatura en Ingeniería Eléctrica y Tecnologías de la Información (TU Wien)</em><br>"
-            "<strong>🚧 Demo Interactivo de Decisiones Inmobiliarias (Riviera Maya y CDMX)</strong></div>",
+            "<strong>🚧 Motor Interactivo de Decisiones Inmobiliarias (Playa del Carmen, Tulum y CDMX)</strong></div>",
             unsafe_allow_html=True,
         )
     else:
@@ -430,33 +104,44 @@ with top_col1:
         st.markdown(
             "<div class='header-caption'><strong>Created by Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.</strong><br>"
             "<em>Master of Science in Telecommunications · Bachelor of Science in Electrical Engineering and Information Technology (TU Wien)</em><br>"
-            "<strong>🚧 Interactive Decision Engine Demo (Riviera Maya & CDMX)</strong></div>",
+            "<strong>🚧 Interactive Decision Engine Demo (Playa del Carmen, Tulum & CDMX)</strong></div>",
             unsafe_allow_html=True,
         )
 
-
-
-# Highlight Banner: What This Project Is & What It Does
+# Explicit Demo & Synthetic Data Warning Banner
 if lang == "es":
+    st.warning(
+        "⚠️ **Demo Público (Datos Sintéticos Ilustrativos):** "
+        "Para proteger la privacidad del negocio familiar y de los huéspedes, este repositorio utiliza **datos mensuales sintéticos** "
+        "(`source = 'synthetic_demo'`) para 4 unidades ilustrativas (**Unidad A Playa**, **Unidad B Playa**, **Unidad C Playa** y **Unidad Tulum**). "
+        "Las cifras de mercado (como el ~46% de ocupación anual en Tulum y ~58% en Playa del Carmen) provienen de benchmarks públicos de **AirDNA (2026)**."
+    )
     st.info(
-        "🎯 **Sobre Este Proyecto (Demo Interactivo):** "
-        "Construí este motor de decisiones de extremo a extremo (**SQL $\\rightarrow$ Machine Learning $\\rightarrow$ Simulación Monte Carlo $\\rightarrow$ Streamlit**) "
-        "para resolver un problema real en el negocio (un negocio familiar con 3 departamentos en **Playa del Carmen** y 1 en **Tulum**): "
-        "*cuando un inquilino ofrece un contrato fijo de 3 o 6 meses, ¿debemos aceptar la oferta hoy, negociar una renta más alta o dejar el calendario abierto "
-        "para rentas cortas por Airbnb y grupos de Facebook?* A diferencia de calculadoras simples, este modelo incorpora la **tarifa eléctrica CFE DAC de verano** "
-        "(donde el aire acondicionado eleva el recibo a `$5,500–$6,500 MXN/mes`), la mezcla de reservas directas sin comisión en **Grupos de Facebook (0%)** vs. **Airbnb (~18%)**, "
-        "y permite ingresar el **100% de tus costos reales** sin suposiciones ocultas."
+        "🎯 **Sobre Este Proyecto:** "
+        "Motor de decisiones de extremo a extremo (**SQL $\\rightarrow$ Modelos ML con Validación Temporal $\\rightarrow$ Simulación Monte Carlo $\\rightarrow$ Streamlit**) "
+        "diseñado para responder una pregunta operativa real: *cuando un inquilino ofrece un contrato fijo de 3 o 6 meses, ¿conviene aceptar la oferta hoy, "
+        "negociar una renta más alta o dejar el calendario abierto para rentas cortas por Airbnb y grupos de Facebook?* "
+        "Modela la regla real de reclasificación **CFE DAC por promedio móvil de 12 meses** (Tarifa 1B: límite de `400 kWh/mes`), "
+        "la mezcla de reservas directas en **Grupos de Facebook (0% comisión)** vs. **Airbnb (~18%)**, y el número exacto de días calendario de cada mes."
     )
 else:
-    st.info(
-        "🎯 **About This Project (Interactive Demo):** "
-        "I built this end-to-end decision engine (**SQL $\\rightarrow$ Machine Learning $\\rightarrow$ Monte Carlo Simulation $\\rightarrow$ Streamlit**) "
-        "to solve a real operational question for a family rental business operating 3 apartments in **Playa del Carmen** and 1 in **Tulum**): "
-        "*when a prospective tenant offers a guaranteed 3-month or 6-month lease, should we accept the contract today, negotiate a higher rate, or keep the calendar open "
-        "for short-term stays across Airbnb and Facebook Groups?* Unlike basic revenue calculators, this engine models Quintana Roo's **May–Oct CFE DAC summer electricity trap** "
-        "(`$5,500–$6,500 MXN/mo` in A/C bills paid by the host on short-term stays vs. paid by the tenant on a lease), blends **0%-fee Facebook Group direct bookings** with **Airbnb (~18% fee)**, "
-        "and takes **100% user-entered cost inputs** with zero hardcoded expense assumptions."
+    st.warning(
+        "⚠️ **Public Demo (Illustrative Synthetic Inputs):** "
+        "To protect family-business and guest privacy, this repository uses **synthetic monthly history** (`source = 'synthetic_demo'`) "
+        "for 4 anonymized units (**Unit A Playa**, **Unit B Playa**, **Unit C Playa**, and **Unit Tulum**). "
+        "Market-level reference figures (such as Tulum's ~46% and Playa del Carmen's ~58% annual mean occupancy) are cited from public **AirDNA (2026)** benchmarks."
     )
+    st.info(
+        "🎯 **About This Project:** "
+        "End-to-end decision engine (**SQL $\\rightarrow$ Chronological ML Models $\\rightarrow$ Monte Carlo Simulation $\\rightarrow$ Streamlit**) "
+        "built to answer a real operational question: *when a prospective tenant offers a guaranteed 3-month or 6-month lease, should we accept the contract today, "
+        "negotiate a higher rate, or keep the calendar open for short-term stays across Airbnb and Facebook Groups?* "
+        "Models CFE's **12-month rolling average DAC electricity reclassification rule** (Tariff 1B: `400 kWh/month` rolling threshold), "
+        "blends **0%-fee Facebook Group direct bookings** with **Airbnb (~18% fee)**, and uses exact calendar days per month."
+    )
+
+# Train / fetch cached ML models
+model_bundle = get_trained_model_bundle()
 
 # Scenario Preset Selector
 if lang == "es":
@@ -465,14 +150,14 @@ if lang == "es":
         "Escenario 2: Temporada Alta de Invierno (Unidad C Playa · Nov–Abr · Oferta 6 Meses @ $30,000 MXN/mes)",
         "Escenario 3: Decisión Cerrada en Transición (Unidad A Playa · Abr–Jun · Oferta 3 Meses @ $23,500 MXN/mes)",
     ]
-    preset_label = "🎬 Selecciona un Escenario Demo Preconfigurado (o personaliza todos los costos en el panel izquierdo):"
+    preset_label = "🎬 Selecciona un Escenario Demo Preconfigurado (o personaliza los costos en el panel izquierdo):"
 else:
     preset_options = [
         "Scenario 1: Summer CFE DAC Trap (Unit Tulum · May–Oct · 6M Offer @ $25,000 MXN/mo)",
         "Scenario 2: Peak Winter High Season (Unit C Playa · Nov–Apr · 6M Offer @ $30,000 MXN/mo)",
         "Scenario 3: Split Season Close Call (Unit A Playa · Apr–Jun · 3M Offer @ $23,500 MXN/mo)",
     ]
-    preset_label = "🎬 Load a Demo Scenario Preset (or customize every cost input in the left sidebar):"
+    preset_label = "🎬 Load a Demo Scenario Preset (or customize any cost input in the left sidebar):"
 
 scenario_preset = st.selectbox(preset_label, preset_options)
 
@@ -487,7 +172,7 @@ else:
     default_hoa, default_wifi, default_clean, default_summer_cfe = 2800.0, 1100.0, 650.0, 5800.0
 
 # ==============================================================================
-# 3. Sidebar: 100% User-Controlled Property, Lease, Channel & Cost Inputs
+# 2. Sidebar: Property, Lease, Channel & CFE Inputs
 # ==============================================================================
 unit_keys = list(PORTFOLIO_UNITS.keys())
 name_key = "name_es" if lang == "es" else "name_en"
@@ -503,16 +188,19 @@ with st.sidebar:
             **Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.**
             - 🎓 **Maestría en Ciencias en Telecomunicaciones** *(TU Wien)*
             - 🎓 **Licenciatura en Ingeniería Eléctrica y Tecnología de la Información** *(TU Wien)*
-            - 💼 **Científico de Datos & Ingeniero de ML** """
+            - 💼 **Científico de Datos & Ingeniero de ML**
+            """
         )
-    else:    
+    else:
         st.markdown(
-        """
-        **Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.**
-        - 🎓 **Master of Science in Telecommunications** *(TU Wien)*
-        - 🎓 **Bachelor of Science in Electrical Engineering and Information Technology** *(TU Wien)*
-        - 💼 **Data Scientist & ML Engineer** """
-                )
+            """
+            **Erik Šauša, Dipl.-Ing. (M.Sc.), B.Sc.**
+            - 🎓 **Master of Science in Telecommunications** *(TU Wien)*
+            - 🎓 **Bachelor of Science in Electrical Engineering and Information Technology** *(TU Wien)*
+            - 💼 **Data Scientist & ML Engineer**
+            """
+        )
+
     st.header("1. Unidad y Oferta" if lang == "es" else "1. Apartment & Lease Offer")
     selected_label = st.selectbox(
         "Seleccionar Propiedad" if lang == "es" else "Select Property",
@@ -542,11 +230,11 @@ with st.sidebar:
         step=500.0,
     )
 
-    st.header("2. Tus Gastos Reales" if lang == "es" else "2. Your Exact Unit Expenses")
+    st.header("2. Gastos Operativos" if lang == "es" else "2. Operating Expenses")
     st.caption(
-        "Cero suposiciones: ingresa los costos reales del departamento:"
+        "Ingresa los gastos operativos del departamento (valores iniciales ilustrativos):"
         if lang == "es"
-        else "Zero hardcoded assumptions—enter your exact property expenses:"
+        else "Enter the unit's operating expenses (defaults are illustrative):"
     )
     hoa_mxn = st.number_input(
         "Mantenimiento / HOA Mensual (MXN)" if lang == "es" else "Monthly HOA / Maintenance (MXN)",
@@ -588,22 +276,72 @@ with st.sidebar:
         value=18.0,
         step=0.5,
     )
-    winter_cfe = st.number_input(
-        "Recibo CFE Invierno en Renta Corta (Nov–Abr, MXN)" if lang == "es" else "Winter Monthly CFE Bill on STR (Nov–Apr, MXN)",
-        min_value=0.0,
-        value=1600.0,
-        step=200.0,
-    )
-    summer_cfe = st.number_input(
-        "Recibo CFE DAC Verano en Renta Corta (May–Oct, MXN)" if lang == "es" else "Summer Monthly CFE DAC Bill on STR (May–Oct, MXN)",
-        min_value=0.0,
-        value=default_summer_cfe,
-        step=200.0,
-    )
 
-# Run Simulation
+    cfe_mode = st.radio(
+        "Modo de Estimación CFE" if lang == "es" else "CFE Electricity Input Mode",
+        options=(
+            ["Recibo Mensual Directo (MXN)", "Simulador kWh Promedio Móvil 12M (Tarifa 1B)"]
+            if lang == "es"
+            else ["Direct Monthly Bills (MXN)", "12M Rolling-Average kWh Mode (Tariff 1B)"]
+        ),
+    )
+    use_kwh_mode = "kWh" in cfe_mode
+
+    prior_11m_kwh = None
+    window_monthly_kwh = None
+    if use_kwh_mode:
+        prior_avg_kwh = st.slider(
+            "Promedio kWh/mes (11 meses previos)" if lang == "es" else "Prior 11-Month Avg Consumption (kWh/mo)",
+            min_value=150,
+            max_value=900,
+            value=390,
+            step=10,
+        )
+        winter_kwh = st.slider(
+            "Consumo Mensual Invierno en Renta Corta (kWh)" if lang == "es" else "Winter STR Monthly Usage (Nov–Apr, kWh)",
+            min_value=150,
+            max_value=800,
+            value=280,
+            step=20,
+        )
+        summer_kwh = st.slider(
+            "Consumo Mensual Verano A/C en Renta Corta (kWh)" if lang == "es" else "Summer STR Monthly Usage (May–Oct, kWh)",
+            min_value=300,
+            max_value=1200,
+            value=780,
+            step=20,
+        )
+        winter_cfe = 1600.0
+        summer_cfe = default_summer_cfe
+    else:
+        winter_cfe = st.number_input(
+            "Recibo CFE Invierno en Renta Corta (Nov–Abr, MXN)" if lang == "es" else "Winter Monthly CFE Bill on STR (Nov–Apr, MXN)",
+            min_value=0.0,
+            value=1600.0,
+            step=200.0,
+        )
+        summer_cfe = st.number_input(
+            "Recibo CFE DAC Verano en Renta Corta (May–Oct, MXN)" if lang == "es" else "Summer Monthly CFE DAC Bill on STR (May–Oct, MXN)",
+            min_value=0.0,
+            value=default_summer_cfe,
+            step=200.0,
+        )
+
+# ==============================================================================
+# 3. Forecast & Monte Carlo Execution (via `src.rental_engine`)
+# ==============================================================================
 months_window = [((start_month - 1 + i) % 12) + 1 for i in range(contract_months)]
-forecasts = build_unit_monthly_forecasts(selected_unit_id, months_window, lang=lang)
+forecasts = predict_unit_monthly_forecasts(
+    model_bundle, selected_unit_id, months_window, lang=lang
+)
+
+if use_kwh_mode:
+    prior_11m_kwh = [float(prior_avg_kwh)] * 11
+    window_monthly_kwh = [
+        float(summer_kwh if m in DEFAULT_ASSUMPTIONS.summer_months else winter_kwh)
+        for m in months_window
+    ]
+
 user_costs = UserCostInputs(
     unit_id=selected_unit_id,
     contract_months=int(contract_months),
@@ -617,7 +355,14 @@ user_costs = UserCostInputs(
     winter_cfe_monthly_mxn=float(winter_cfe),
     summer_cfe_monthly_mxn=float(summer_cfe),
 )
-sim_results = run_monte_carlo_simulation(forecasts, user_costs, lang=lang)
+
+sim_results = simulate_lease_vs_str(
+    forecasts,
+    user_costs,
+    lang=lang,
+    prior_11m_kwh=prior_11m_kwh,
+    window_monthly_kwh=window_monthly_kwh,
+)
 
 # ==============================================================================
 # 4. Presentation Tabs (Bilingual EN / ES)
@@ -625,15 +370,15 @@ sim_results = run_monte_carlo_simulation(forecasts, user_costs, lang=lang)
 if lang == "es":
     tab_titles = [
         "📊 1. Simulador de Decisiones en Vivo",
-        "💡 2. Qué Hace Este Proyecto y Trampa CFE DAC",
-        "🤖 3. Arquitectura SQL + Modelos ML",
+        "💡 2. Regla CFE DAC (Promedio 12M) y Supuestos",
+        "🤖 3. Arquitectura SQL + Backtesting ML Real",
         "💬 4. Lector de Publicaciones de Facebook",
     ]
 else:
     tab_titles = [
         "📊 1. Live Decision Simulator",
-        "💡 2. What This Project Does & CFE DAC Economics",
-        "🤖 3. SQL Architecture & ML Backtesting",
+        "💡 2. CFE DAC 12M Rolling Rule & Assumptions",
+        "🤖 3. SQL Architecture & Computed ML Backtesting",
         "💬 4. Facebook Group Post Parser",
     ]
 
@@ -645,7 +390,10 @@ with tab_sim:
     )
     window_str = ", ".join(month_map[m] for m in months_window)
     st.caption(
-        f"*{unit_info[notes_key]}* · {'Periodo' if lang == 'es' else 'Window'}: **{window_str} ({contract_months} {'Meses' if lang == 'es' else 'Months'})**"
+        f"*{unit_info[notes_key]}* · {'Periodo' if lang == 'es' else 'Window'}: "
+        f"**{window_str} ({contract_months} {'Meses' if lang == 'es' else 'Months'})** · "
+        f"{'Modelo Activo' if lang == 'es' else 'Active Forecast Model'}: **{model_bundle.active_model_name}** "
+        f"(σ_ADR = {model_bundle.adr_residual_std_mxn:.0f} MXN, σ_Occ = {model_bundle.occ_residual_std * 100:.1f} pts)"
     )
 
     rec_prefix = "RECOMENDACIÓN" if lang == "es" else "RECOMMENDATION"
@@ -667,7 +415,7 @@ with tab_sim:
         delta="Inquilino paga CFE" if lang == "es" else "Tenant pays CFE",
     )
     k2.metric(
-        f"Mediana Renta Corta (P50)" if lang == "es" else f"{contract_months}M STR Median Net (P50)",
+        "Mediana Renta Corta (P50)" if lang == "es" else f"{contract_months}M STR Median Net (P50)",
         f"${sim_results['str_p50_net_mxn']:,.0f} MXN",
         delta=f"{sim_results['str_p50_net_mxn'] - sim_results['lease_total_net_mxn']:+,.0f} vs {'Contrato' if lang == 'es' else 'Lease'}",
     )
@@ -677,7 +425,7 @@ with tab_sim:
     )
     k4.metric(
         "Ocupación de Equilibrio" if lang == "es" else "Break-Even Occupancy",
-        f"{sim_results['mean_break_even_occupancy']:.1f}%",
+        f"{sim_results['mean_break_even_occupancy_pct']:.1f}%",
     )
     k5.metric(
         "Renta Mensual de Indiferencia" if lang == "es" else "Indifference Monthly Rent",
@@ -756,9 +504,9 @@ with tab_sim:
         )
         fig_bar.update_layout(
             title=(
-                "Comparación Mensual de Flujo Neto: Contrato vs. Renta Corta"
+                "Comparación Mensual de Flujo Neto (Días Exactos del Mes)"
                 if lang == "es"
-                else "Month-by-Month Expected Net Income: Lease vs. Short-Term"
+                else "Month-by-Month Expected Net Income (Exact Calendar Days)"
             ),
             xaxis_title="Mes del Contrato" if lang == "es" else "Contract Month",
             yaxis_title="Ingreso Neto Mensual (MXN)" if lang == "es" else "Monthly Net Income (MXN)",
@@ -777,100 +525,144 @@ with tab_sim:
 
     st.dataframe(sim_results["monthly_df"], use_container_width=True, hide_index=True)
 
+    if sim_results["cfe_trajectory"] is not None:
+        st.markdown(
+            "##### ⚡ "
+            + (
+                "Trayectoria CFE Promedio Móvil 12 Meses (Tarifa 1B: Límite 400 kWh/mes)"
+                if lang == "es"
+                else "12-Month Rolling Average CFE DAC Trajectory (Tariff 1B: 400 kWh/mo Limit)"
+            )
+        )
+        st.dataframe(pd.DataFrame(sim_results["cfe_trajectory"]), use_container_width=True, hide_index=True)
+
 with tab_story:
     if lang == "es":
-        st.subheader("¿Qué Hace Este Proyecto y Por Qué Lo Construí?")
+        st.subheader("Regla Oficial CFE DAC (Promedio Móvil 12 Meses) y Supuestos Explícitos")
         c1, c2 = st.columns(2)
         with c1:
             st.markdown(
                 """
-                #### 1. El Problema Real de Nuestro Negocio Familiar
-                Este es mi proyecto de portafolio de **Ciencia de Datos y Machine Learning**, diseñado como una herramienta real para nuestro negocio familiar, donde administramos **4 departamentos en la Riviera Maya**:
-                - **Playa del Carmen**: Unidad A y Unidad B (**1 Rec / 1 Baño**) y Unidad C (**2 Rec / 2 Baños**).
-                - **Tulum**: Unidad Tulum (**1 Rec / 1 Baño**).
+                #### 1. El Problema Operativo en la Riviera Maya
+                Este proyecto evalúa **4 departamentos ilustrativos en la Riviera Maya** (basados en la estructura de un negocio familiar real, anonimizados para este demo público):
+                - **Playa del Carmen**: **Unidad A Playa** y **Unidad B Playa** (**1 Rec / 1 Baño**) y **Unidad C Playa** (**2 Rec / 2 Baños**).
+                - **Tulum**: **Unidad Tulum** (**1 Rec / 1 Baño**, anclada al ~46% de ocupación media anual del mercado de Tulum según **AirDNA 2026**).
 
-                Cada temporada recibimos ofertas de nómadas digitales que buscan rentar por **3 o 6 meses** a tarifa fija. Mirar solo la tarifa por noche de Airbnb engaña, porque en renta corta el propietario absorbe comisiones, limpiezas, vacancia y electricidad.
+                Cada temporada, trabajadores remotos ofrecen contratos de **3 o 6 meses** a tarifa fija. Comparar solo la tarifa por noche de Airbnb contra una renta mensual lleva a malas decisiones si no se descuentan comisiones, limpiezas, vacancia y electricidad.
                 """
             )
         with c2:
             st.markdown(
                 """
-                #### 2. La "Trampa de Electricidad CFE DAC" en Verano (Mayo–Octubre)
-                - **En Renta Corta (Airbnb / Facebook por noche)**: El propietario paga el **100% del recibo de luz CFE**. De mayo a octubre, el uso continuo de aire acondicionado supera los **400 kWh/mes**, disparando el cobro a la **tarifa CFE DAC sin subsidio** (`~6.08 MXN/kWh + 16% IVA`, o **`$5,500–$6,500 MXN/mes`**).
-                - **En Contrato de 3 o 6 Meses**: El **inquilino paga la luz CFE directamente** según lectura de medidor al entrar y salir, ahorrándole al propietario más de `$35,000 MXN` durante los 6 meses de calor.
+                #### 2. Cómo Funciona Realmente la Tarifa CFE DAC (Promedio Móvil 12 Meses)
+                - **Regla de los 12 Meses (CFE Tarifa 1B = 400 kWh/mes)**: La CFE **no** reclasifica un medidor por un solo mes alto. Calcula el **promedio móvil de los últimos 12 meses** (6 bimestres). Si ese promedio supera los **400 kWh/mes** en Tarifa 1B, el medidor cae en **Tarifa DAC sin subsidio** (`~6.08 MXN/kWh + 16% IVA`).
+                - **Persistencia en Invierno**: Una vez en DAC, **incluso los meses de invierno** se cobran a tarifa DAC hasta que el promedio de 12 meses vuelva a bajar de `400 kWh/mes`.
+                - **Efecto del Inquilino en el Medidor**: En un contrato de 3 o 6 meses el inquilino paga su recibo CFE, pero su consumo en kWh queda registrado en el historial de 12 meses del medidor.
                 """
             )
-        st.markdown("#### 3. Mezcla de Canales: Grupos de Facebook (0% Comisión) vs. Airbnb (~18% Comisión)")
-        st.info(
-            f"Con tu configuración actual de **{fb_share_pct}% de reservas directas por Facebook** y "
-            f"**{100 - fb_share_pct}% por Airbnb** (al {airbnb_fee_pct:.1f}% de comisión + impuesto de hospedaje), "
-            f"tu comisión efectiva ponderada baja del **{airbnb_fee_pct:.1f}%** al **{sim_results['blended_platform_fee_pct'] * 100:.2f}%**."
-        )
     else:
-        st.subheader("What This Project Does & Why I Built It")
+        st.subheader("Official CFE DAC 12-Month Rolling Rule & Explicit Model Assumptions")
         c1, c2 = st.columns(2)
         with c1:
             st.markdown(
                 """
-                #### 1. The Real Family-Business Problem
-                This is my **Data Science & Machine Learning portfolio project**, built as a live decision tool for our family's **4 rental apartments in the Riviera Maya**:
-                - **Playa del Carmen**: Unit A and Unit B (**1BR/1BA**) and Unit C (**2BR/2BA**).
-                - **Tulum**: Unit Tulum (**1BR/1BA**).
+                #### 1. The Operational Problem in the Riviera Maya
+                This project evaluates **4 anonymized portfolio units in the Riviera Maya** (modeled on a family-run rental operation, with synthetic history for privacy):
+                - **Playa del Carmen**: **Unit A Playa** and **Unit B Playa** (**1BR/1BA**) and **Unit C Playa** (**2BR/2BA**).
+                - **Tulum**: **Unit Tulum** (**1BR/1BA**, anchored to Tulum's ~46% market-wide annual occupancy per **AirDNA 2026**).
 
-                Every season, remote workers and expats offer fixed **3-month or 6-month leases**. Comparing gross nightly Airbnb rates against a monthly lease is misleading because short-term stays carry heavy variable drags that disappear on a mid-term contract.
+                Every season, remote workers offer fixed **3-month or 6-month leases**. Comparing gross nightly Airbnb rates against a monthly lease is misleading because short-term stays carry variable costs that disappear on a mid-term contract.
                 """
             )
         with c2:
             st.markdown(
                 """
-                #### 2. The "CFE DAC Summer Electricity Trap" (May–Oct)
-                - **On Short-Term Rentals (Airbnb / Direct STR)**: The owner pays **100% of the CFE electricity bill**. Between May and October, 24/7 guest A/C usage pushes Riviera Maya apartments above **400 kWh/month** into Mexico's unsubsidized **CFE DAC tariff** (`~6.08 MXN/kWh + 16% IVA`, or **`$5,500–$6,500 MXN/month`**).
-                - **On a 3M or 6M Lease**: The **tenant pays CFE electricity directly** via check-in/check-out meter readings, saving the owner `$33,000–$39,000 MXN` over a 6-month summer window.
+                #### 2. How CFE DAC Reclassification Actually Works (12-Month Rolling Average)
+                - **12-Month Rolling Rule (CFE Tariff 1B = 400 kWh/mo)**: CFE does **not** trigger DAC from a single month in isolation. It computes the **trailing 12-month average** consumption (6 bimonthly bills). When that rolling mean exceeds **400 kWh/month** under Tariff 1B, the meter loses government subsidy and enters **DAC** (`~6.08 MXN/kWh + 16% IVA`).
+                - **Winter Persistence**: Once reclassified into DAC, **winter months are also billed at the DAC rate** until the 12-month rolling average falls back to or below `400 kWh/month`.
+                - **Lease Meter Carryover**: On a 3M/6M lease, the tenant pays CFE directly, saving the owner `$33,000–$39,000 MXN` in summer bills—though heavy tenant A/C kWh still counts toward the meter's 12-month rolling window.
                 """
             )
-        st.markdown("#### 3. Blended Booking Channel Economics: Facebook Groups (0% Fee) vs. Airbnb (~18% Fee)")
-        st.info(
-            f"With your current slider set to **{fb_share_pct}% Facebook Group Direct** and "
-            f"**{100 - fb_share_pct}% Airbnb** (at {airbnb_fee_pct:.1f}% OTA + Q. Roo tax), your effective blended platform fee "
-            f"drops from **{airbnb_fee_pct:.1f}%** to **{sim_results['blended_platform_fee_pct'] * 100:.2f}%**."
+
+    st.markdown(
+        "#### 3. "
+        + (
+            "Tabla de Supuestos Explícitos (`src/rental_engine/assumptions.py`)"
+            if lang == "es"
+            else "Explicit Modeling Assumptions (`src/rental_engine/assumptions.py`)"
         )
+    )
+    assumptions_table = pd.DataFrame(
+        [
+            {
+                "Parameter": "cfe_tariff / cfe_dac_threshold_kwh",
+                "Value": f"Tariff {DEFAULT_ASSUMPTIONS.cfe_tariff} ({DEFAULT_ASSUMPTIONS.cfe_dac_threshold_kwh:.0f} kWh/mo rolling 12M mean)",
+                "Source / Rationale": "CFE Tarifas Domésticas & DAC (accessed 2026-11-15); 1C = 850 kWh/mo also supported",
+            },
+            {
+                "Parameter": "cfe_dac_rate_mxn_per_kwh / cfe_subsidized_rate_mxn_per_kwh",
+                "Value": f"{DEFAULT_ASSUMPTIONS.cfe_dac_rate_mxn_per_kwh:.2f} / {DEFAULT_ASSUMPTIONS.cfe_subsidized_rate_mxn_per_kwh:.2f} MXN/kWh (+16% IVA)",
+                "Source / Rationale": "CFE Peninsular DAC vs. blended subsidized Tariff 1B energy rate",
+            },
+            {
+                "Parameter": "adr_std_mxn / occ_std (Monte Carlo spread)",
+                "Value": f"Computed from out-of-time backtest residuals ({model_bundle.adr_residual_std_mxn:.1f} MXN / {model_bundle.occ_residual_std * 100:.2f} pts)",
+                "Source / Rationale": f"Out-of-time test split (year_month > {model_bundle.cutoff_year_month}); fallback {DEFAULT_ASSUMPTIONS.fallback_adr_std_mxn:.0f} MXN / {DEFAULT_ASSUMPTIONS.fallback_occ_std * 100:.0f} pts",
+            },
+            {
+                "Parameter": "min_sampled_adr_mxn / occ clip bounds",
+                "Value": f">= {DEFAULT_ASSUMPTIONS.min_sampled_adr_mxn:.0f} MXN | [{DEFAULT_ASSUMPTIONS.min_sampled_occ_rate * 100:.0f}%, {DEFAULT_ASSUMPTIONS.max_sampled_occ_rate * 100:.0f}%]",
+                "Source / Rationale": "Prevents negative or >100% physical occupancy in normal draws",
+            },
+            {
+                "Parameter": "Decision thresholds (ACCEPT / KEEP OPEN / Markup)",
+                "Value": f"P(STR>Lease) < {DEFAULT_ASSUMPTIONS.accept_lease_max_str_win_prob:.2f} | > {DEFAULT_ASSUMPTIONS.keep_open_min_str_win_prob:.2f} | {DEFAULT_ASSUMPTIONS.counter_offer_risk_premium:.2f}x",
+                "Source / Rationale": "Risk-averse decision boundaries & 5% counter-offer premium over indifference rent",
+            },
+            {
+                "Parameter": "Public Market Benchmarks (Playa / Tulum / CDMX)",
+                "Value": "Playa 58% occ ($103 ADR) · Tulum 46% occ ($125 ADR) · CDMX 66% occ ($105 ADR)",
+                "Source / Rationale": "AirDNA MarketMinder public market summaries (accessed 2026)",
+            },
+        ]
+    )
+    st.dataframe(assumptions_table, use_container_width=True, hide_index=True)
 
 with tab_ml:
     st.subheader(
-        "Arquitectura Técnica: SQL, Modelos ML y Validación Temporal"
+        "Arquitectura SQL, Entrenamiento Real y Validación Temporal"
         if lang == "es"
-        else "Technical Architecture: SQL, ML Models & Chronological Backtesting"
+        else "SQL Architecture, Real Model Training & Chronological Backtesting"
     )
     st.markdown(
         """
         ```text
-        [Reservation CSV + Cached AirROI JSON ($0 Re-Run Cost)]
+        [SQLite Synthetic Demo Panel (`properties`, `reservations`, `monthly_history`, `market_benchmarks`)]
                                       │
                                       ▼
-        [SQLite / DuckDB (`properties`, `reservations`, `monthly_history`)]
+        [Chronological Split (`src/rental_engine/models.py`): Train <= 2025-06 (90 rows) | Test > 2025-06 (30 rows)]
                                       │
                                       ▼
-        [Model A: Nightly ADR (XGBoost/RF)  +  Model B: Monthly Occupancy % (XGBoost/RF)]
+        [Fit & Evaluate: Seasonal Median Baseline vs. RandomForestRegressor vs. XGBRegressor]
                                       │
                                       ▼
-        [5,000-Run Monte Carlo Simulator + User Cost Inputs (HOA, Cleaning, CFE DAC, FB %)]
+        [Extract Out-of-Time Residual Stds (σ_ADR, σ_Occ) + Point Forecasts -> 5,000-Run Monte Carlo Engine]
                                       │
                                       ▼
         [Explainable Decision: ACCEPT CONTRACT vs. NEGOTIATE vs. KEEP CALENDAR OPEN]
         ```
         """
     )
-    backtest_df = pd.DataFrame(
-        [
-            {"Model": "Seasonal Median Baseline", "Target": "Model A: ADR (MXN)", "MAE": "248 MXN", "RMSE": "312 MXN"},
-            {"Model": "Random Forest Regressor", "Target": "Model A: ADR (MXN)", "MAE": "164 MXN", "RMSE": "215 MXN"},
-            {"Model": "XGBoost Regressor", "Target": "Model A: ADR (MXN)", "MAE": "142 MXN", "RMSE": "188 MXN"},
-            {"Model": "Seasonal Median Baseline", "Target": "Model B: Occupancy (%)", "MAE": "8.4 pts", "RMSE": "10.9 pts"},
-            {"Model": "Random Forest Regressor", "Target": "Model B: Occupancy (%)", "MAE": "6.1 pts", "RMSE": "7.8 pts"},
-            {"Model": "XGBoost Regressor", "Target": "Model B: Occupancy (%)", "MAE": "5.3 pts", "RMSE": "6.9 pts"},
-        ]
+    st.caption(
+        "📊 **Nota Metodológica Honesta:** Las métricas de la tabla inferior se calculan en vivo ejecutando `.fit()` en `year_month <= 2025-06` "
+        "y evaluando en `year_month > 2025-06` sobre el panel sintético (`source = 'synthetic_demo'`). Demuestran que el pipeline temporal sin fuga de datos "
+        "funciona de extremo a extremo, no precisión sobre datos privados."
+        if lang == "es"
+        else "📊 **Methodological Note:** The metrics below are computed live by running `.fit()` on `year_month <= 2025-06` and evaluating on "
+        "`year_month > 2025-06` over the synthetic demo panel (`source = 'synthetic_demo'`). They verify the leak-free chronological pipeline and supply the "
+        "residual standard deviations used in Monte Carlo, rather than claiming accuracy on private booking records."
     )
-    st.dataframe(backtest_df, use_container_width=True, hide_index=True)
+    st.dataframe(model_bundle.backtest_metrics_df, use_container_width=True, hide_index=True)
 
 with tab_fb:
     st.subheader(
@@ -879,9 +671,9 @@ with tab_fb:
         else "Safe Copy-Paste Facebook Group Rental Post Parser (0% Account Ban Risk)"
     )
     st.caption(
-        "En lugar de arriesgar tu cuenta personal de Facebook con bots en grupos privados, pega aquí cualquier texto de una publicación de renta en Playa del Carmen o Tulum:"
+        "En lugar de usar bots en grupos privados, pega aquí cualquier texto de una publicación de renta en Playa del Carmen o Tulum:"
         if lang == "es"
-        else "Instead of risking your personal Facebook account with automated scrapers in closed groups, paste any raw listing text from a Playa del Carmen or Tulum Facebook group below:"
+        else "Instead of running automated scrapers in closed groups, paste any raw listing text from a Playa del Carmen or Tulum Facebook group below:"
     )
     default_fb_text = (
         "Disponible 1 de mayo! Hermoso depto 1 recámara en Aldea Zama, Tulum. Alberca en rooftop y WiFi fibra. $24,500 MXN/mes + CFE luz aparte. Contrato 3 o 6 meses."

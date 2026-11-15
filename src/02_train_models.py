@@ -1,55 +1,41 @@
 """
-Phase 2: Machine Learning Models for ADR (Model A) and Occupancy (Model B)
-with strict chronological train/test splitting (zero future data leakage).
+Phase 2 CLI & Re-export Wrapper: ADR (Model A) and Occupancy (Model B) Training & Backtesting.
+Delegates all logic to `src.rental_engine.models`.
 """
-from typing import Dict, Tuple
-import numpy as np
-import pandas as pd
+import sys
+from pathlib import Path
 
-try:
-    from sklearn.ensemble import RandomForestRegressor
-    from sklearn.metrics import mean_absolute_error, root_mean_squared_error
-    from xgboost import XGBRegressor
-    HAS_ML_LIBS = True
-except ImportError:
-    HAS_ML_LIBS = False
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
+from src.rental_engine.data import load_training_dataframe  # noqa: E402
+from src.rental_engine.models import (  # noqa: E402
+    FEATURE_COLUMNS,
+    HAS_XGBOOST,
+    SeasonalMedianBaseline,
+    TrainedModelBundle,
+    add_temporal_features,
+    chronological_train_test_split,
+    predict_unit_monthly_forecasts,
+    train_and_evaluate_models,
+)
 
-FEATURE_COLUMNS = [
-    "bedrooms",
-    "bathrooms",
-    "month_num",
-    "month_sin",
-    "month_cos",
-    "is_high_season",
-    "is_summer_dac_season",
-    "has_pool",
-    "has_rooftop",
-    "market_median_adr_mxn",
-    "market_median_occ",
+__all__ = [
+    "FEATURE_COLUMNS",
+    "HAS_XGBOOST",
+    "SeasonalMedianBaseline",
+    "TrainedModelBundle",
+    "add_temporal_features",
+    "chronological_train_test_split",
+    "predict_unit_monthly_forecasts",
+    "train_and_evaluate_models",
 ]
 
 
-def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Adds cyclical month encodings and Riviera Maya seasonal flags."""
-    out = df.copy()
-    out["month_sin"] = np.sin(2.0 * np.pi * out["month_num"] / 12.0)
-    out["month_cos"] = np.cos(2.0 * np.pi * out["month_num"] / 12.0)
-    out["is_high_season"] = out["month_num"].isin([12, 1, 2, 3, 4]).astype(int)
-    out["is_summer_dac_season"] = out["month_num"].isin([5, 6, 7, 8, 9, 10]).astype(int)
-    return out
-
-
-def chronological_train_test_split(
-    df: pd.DataFrame, cutoff_year_month: str = "2025-06"
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Splits monthly history strictly by `year_month` so future observations never
-    leak into training features.
-    """
-    df_sorted = df.sort_values("year_month").reset_index(drop=True)
-    train_df = df_sorted[df_sorted["year_month"] <= cutoff_year_month].copy()
-    test_df = df_sorted[df_sorted["year_month"] > cutoff_year_month].copy()
-    if train_df.empty or test_df.empty:
-        raise ValueError(f"Chronological split at {cutoff_year_month} produced an empty partition.")
-    return train_df, test_df
+if __name__ == "__main__":
+    df = load_training_dataframe()
+    bundle = train_and_evaluate_models(df, cutoff_year_month="2025-06")
+    print(f"Active model family: {bundle.active_model_name} (train={bundle.train_rows}, test={bundle.test_rows})")
+    print(f"Backtest residual stds -> ADR: {bundle.adr_residual_std_mxn:.2f} MXN | Occ: {bundle.occ_residual_std * 100:.2f} pts")
+    print(bundle.backtest_metrics_df.to_string(index=False))

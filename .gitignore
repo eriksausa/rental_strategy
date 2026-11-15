@@ -14,7 +14,7 @@ data/raw/*.json
 data/private/
 !data/private/.gitkeep
 
-# Git history helper script & OS/IDE files
+# OS/IDE files
 .DS_Store
 .vscode/
 .pytest_cache/
