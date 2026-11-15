@@ -1,8 +1,8 @@
 -- ============================================================================
--- Casa Bella Rental Strategy Optimizer: SQLite / DuckDB Schema & EDA Queries
+-- Rental Strategy Optimizer: SQLite / DuckDB Schema & EDA Queries
 -- Portfolio Units:
---   * Playa del Carmen (Centro / Gonzalo Guerrero): 2x 1BR/1BA, 1x 2BR/2BA
---   * Tulum (La Veleta): 1x 1BR/1BA
+--   * Playa del Carmen: Unit A Playa, Unit B Playa (1BR/1BA), Unit C Playa (2BR/2BA)
+--   * Tulum: Unit Tulum (1BR/1BA)
 --   * CDMX (Roma Norte): 1x 1BR/1BA Market Comparison Benchmark
 -- ============================================================================
 
@@ -15,10 +15,10 @@ CREATE TABLE IF NOT EXISTS properties (
     bathrooms INTEGER NOT NULL,
     has_pool INTEGER DEFAULT 1,
     has_rooftop INTEGER DEFAULT 1,
-    is_casa_bella INTEGER DEFAULT 1
+    is_portfolio_unit INTEGER DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS casa_bella_reservations (
+CREATE TABLE IF NOT EXISTS reservations (
     reservation_id INTEGER PRIMARY KEY AUTOINCREMENT,
     unit_id TEXT NOT NULL,
     check_in TEXT NOT NULL,
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS monthly_history (
     occupancy_rate REAL NOT NULL,   -- 0.0 to 1.0
     avg_stay_nights REAL DEFAULT 4.5,
     facebook_share REAL DEFAULT 0.60,
-    source TEXT NOT NULL,           -- 'casa_bella_actual', 'airroi_api', 'benchmark'
+    source TEXT NOT NULL,           -- 'synthetic_demo', 'airroi_api', 'benchmark'
     PRIMARY KEY (unit_id, year_month)
 );
 
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS market_benchmarks (
 );
 
 -- ============================================================================
--- Analytical Query 1: Roll up raw Casa Bella reservation list into monthly ADR
+-- Analytical Query 1: Roll up raw portfolio reservation list into monthly ADR
 -- and true available occupancy (excluding family/owner maintenance blocks).
 -- ============================================================================
 -- SELECT
@@ -66,5 +66,5 @@ CREATE TABLE IF NOT EXISTS market_benchmarks (
 --     AVG(CASE WHEN stay_type = 'guest' THEN nights END) AS avg_stay_nights,
 --     SUM(CASE WHEN channel = 'facebook' AND stay_type = 'guest' THEN nights ELSE 0 END) * 1.0 /
 --         NULLIF(SUM(CASE WHEN stay_type = 'guest' THEN nights ELSE 0 END), 0) AS facebook_channel_share
--- FROM casa_bella_reservations
+-- FROM reservations
 -- GROUP BY unit_id, strftime('%Y-%m', check_in);

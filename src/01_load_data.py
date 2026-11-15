@@ -1,5 +1,5 @@
 """
-Phase 1: SQLite Database Loader, Casa Bella Reservation Rollup & AirROI Cache Adapter.
+Phase 1: SQLite Database Loader, Portfolio Reservation Rollup & AirROI Cache Adapter.
 Protects API credits by caching any AirROI response in `data/raw/` before querying.
 """
 import json
@@ -17,11 +17,11 @@ DB_PATH = ROOT_DIR / "data" / "rental_data.db"
 RAW_CACHE_DIR = ROOT_DIR / "data" / "raw"
 SQL_SCHEMA_PATH = ROOT_DIR / "sql" / "schema_and_eda.sql"
 
-CASA_BELLA_UNITS = [
-    ("CB_PDC_1BR_A", "Casa Bella Playa 1BR #A", "Playa del Carmen", "Centro", 1, 1, 1, 1, 1),
-    ("CB_PDC_1BR_B", "Casa Bella Playa 1BR #B", "Playa del Carmen", "Gonzalo Guerrero", 1, 1, 1, 1, 1),
-    ("CB_PDC_2BR", "Casa Bella Playa 2BR/2BA", "Playa del Carmen", "Gonzalo Guerrero", 2, 2, 1, 1, 1),
-    ("CB_TUL_1BR", "Casa Bella Tulum 1BR/1BA", "Tulum", "La Veleta", 1, 1, 1, 1, 1),
+PORTFOLIO_UNITS = [
+    ("UNIT_A_PLAYA", "Unit A Playa", "Playa del Carmen", "Not disclosed A", 1, 1, 1, 1, 1),
+    ("UNIT_B_PLAYA", "Unit B Playa", "Playa del Carmen", "Not disclosed B", 1, 1, 1, 1, 1),
+    ("UNIT_C_PLAYA", "Unit C Playa", "Playa del Carmen", "Not disclosed C", 2, 2, 1, 1, 1),
+    ("UNIT_TULUM", "Unit Tulum", "Tulum", "Not disclosed", 1, 1, 1, 1, 1),
     ("MKT_CDMX_1BR", "CDMX Roma Norte 1BR Benchmark", "CDMX", "Roma Norte", 1, 1, 0, 1, 0),
 ]
 
@@ -59,7 +59,7 @@ def fetch_airroi_market_cached(
 
 
 def build_starter_database(db_path: Path = DB_PATH) -> sqlite3.Connection:
-    """Creates SQLite tables and populates calibrated monthly history for all 4 Casa Bella units."""
+    """Creates SQLite tables and populates calibrated monthly history for all 4 portfolio units (synthetic demo data)."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     schema_sql = SQL_SCHEMA_PATH.read_text(encoding="utf-8")
@@ -68,10 +68,10 @@ def build_starter_database(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn.executemany(
         """
         INSERT OR REPLACE INTO properties
-        (unit_id, unit_name, city, neighborhood, bedrooms, bathrooms, has_pool, has_rooftop, is_casa_bella)
+        (unit_id, unit_name, city, neighborhood, bedrooms, bathrooms, has_pool, has_rooftop, is_portfolio_unit)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        CASA_BELLA_UNITS,
+        PORTFOLIO_UNITS,
     )
 
     rng = np.random.default_rng(42)
@@ -81,17 +81,17 @@ def build_starter_database(db_path: Path = DB_PATH) -> sqlite3.Connection:
     }
 
     unit_base_profiles = {
-        "CB_PDC_1BR_A": (1650.0, 1.00),
-        "CB_PDC_1BR_B": (1750.0, 1.02),
-        "CB_PDC_2BR": (2550.0, 0.98),
-        "CB_TUL_1BR": (1550.0, 0.74),  # Calibrated to ~46% annual mean occupancy in La Veleta
+        "UNIT_A_PLAYA": (1650.0, 1.00),
+        "UNIT_B_PLAYA": (1750.0, 1.02),
+        "UNIT_C_PLAYA": (2550.0, 0.98),
+        "UNIT_TULUM": (1550.0, 0.74),  # Calibrated to Tulum market-wide ~46% occupancy (AirDNA)
         "MKT_CDMX_1BR": (1850.0, 1.08),
     }
 
     bench_rows: List[tuple] = []
     hist_rows: List[tuple] = []
 
-    for unit_id, _, city, neighborhood, bedrooms, bathrooms, has_pool, has_rooftop, is_cb in CASA_BELLA_UNITS:
+    for unit_id, _, city, neighborhood, bedrooms, bathrooms, has_pool, has_rooftop, is_portfolio in PORTFOLIO_UNITS:
         base_adr, occ_mult = unit_base_profiles[unit_id]
         for m in range(1, 13):
             season_factor = 1.25 if m in (12, 1, 2, 3) else (0.82 if m in (5, 6, 8, 9, 10) else 1.0)
@@ -103,7 +103,7 @@ def build_starter_database(db_path: Path = DB_PATH) -> sqlite3.Connection:
                 ym = f"{year}-{m:02d}"
                 realized_adr = round(mkt_adr + rng.normal(0, 75), 2)
                 realized_occ = float(np.clip(mkt_occ + rng.normal(0, 0.04), 0.18, 0.95))
-                src = "casa_bella_actual" if is_cb else "benchmark"
+                src = "synthetic_demo" if is_portfolio else "benchmark"
                 hist_rows.append((unit_id, ym, m, realized_adr, round(realized_occ, 4), 4.5, 0.60, src))
 
     conn.executemany(

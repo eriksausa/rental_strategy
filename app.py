@@ -1,5 +1,5 @@
 """
-Phase 4: Interactive Streamlit Decision Dashboard for Casa Bella.
+Phase 4: Interactive Streamlit Decision Dashboard (portfolio demo).
 Every expense parameter (HOA, cleaning, Wi-Fi, OTA %, Facebook Direct share, and
 winter/summer CFE electricity) is entered directly by the user.
 """
@@ -20,16 +20,16 @@ def _load(name: str, rel_path: str):
 loader = _load("load_data", "src/01_load_data.py")
 engine = _load("decision_engine", "src/03_decision_engine.py")
 
-st.set_page_config(page_title="Casa Bella Rental Strategy Optimizer", layout="wide")
-st.title("Casa Bella â€” Rental Strategy Optimizer (Playa del Carmen, Tulum & CDMX)")
+st.set_page_config(page_title="Rental Strategy Optimizer", layout="wide")
+st.title("Rental Strategy Optimizer (Playa del Carmen, Tulum & CDMX)")
 st.caption("Compare guaranteed 3M/6M lease offers against Short-Term / Facebook Direct stays with CFE DAC simulation.")
 
 conn = loader.build_starter_database()
-units_df = pd.read_sql_query("SELECT * FROM properties WHERE is_casa_bella = 1", conn)
+units_df = pd.read_sql_query("SELECT * FROM properties WHERE is_portfolio_unit = 1", conn)
 
 with st.sidebar:
     st.header("1. Select Apartment & Lease Offer")
-    unit_label = st.selectbox("Casa Bella Unit", units_df["unit_name"].tolist())
+    unit_label = st.selectbox("Portfolio Unit", units_df["unit_name"].tolist())
     selected_unit = units_df[units_df["unit_name"] == unit_label].iloc[0]
 
     start_month = st.selectbox("Contract Start Month", list(range(1, 13)), index=4)
@@ -45,8 +45,8 @@ with st.sidebar:
     st.header("3. Booking Channel & CFE Electricity")
     fb_share = st.slider("Facebook Group Direct Booking Share (%)", 0, 100, 60) / 100.0
     airbnb_fee = st.slider("Airbnb Platform + Lodging Tax (%)", 10.0, 25.0, 18.0, step=0.5) / 100.0
-    winter_cfe = st.number_input("Winter Monthly CFE Bill on STR (Novâ€“Apr, MXN)", value=1600.0, step=200.0)
-    summer_cfe = st.number_input("Summer Monthly CFE DAC Bill on STR (Mayâ€“Oct, MXN)", value=5800.0, step=200.0)
+    winter_cfe = st.number_input("Winter Monthly CFE Bill on STR (Nov–Apr, MXN)", value=1600.0, step=200.0)
+    summer_cfe = st.number_input("Summer Monthly CFE DAC Bill on STR (May–Oct, MXN)", value=5800.0, step=200.0)
 
 months_in_window = [((start_month - 1 + i) % 12) + 1 for i in range(contract_months)]
 bench_df = pd.read_sql_query(

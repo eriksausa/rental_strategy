@@ -1,5 +1,5 @@
 """
-Unit tests for the Casa Bella Rental Strategy Optimizer core logic.
+Unit tests for the Rental Strategy Optimizer core logic.
 Compatible with both `python -m unittest discover -s tests -v` and `pytest -v`.
 """
 import importlib.util
@@ -36,7 +36,7 @@ class TestRentalStrategyOptimizer(unittest.TestCase):
 
     def test_break_even_occupancy_clamped_to_unit_interval(self):
         costs = engine.UserCostInputs(
-            unit_id="CB_PDC_1BR_A",
+            unit_id="UNIT_A_PLAYA",
             contract_months=6,
             monthly_lease_offer_mxn=45000.0,
             hoa_monthly_mxn=2800.0,
@@ -59,7 +59,7 @@ class TestRentalStrategyOptimizer(unittest.TestCase):
 
     def test_monte_carlo_summer_lease_recommendation(self):
         costs = engine.UserCostInputs(
-            unit_id="CB_TUL_1BR",
+            unit_id="UNIT_TULUM",
             contract_months=6,
             monthly_lease_offer_mxn=26000.0,
             hoa_monthly_mxn=3100.0,
@@ -82,7 +82,7 @@ class TestRentalStrategyOptimizer(unittest.TestCase):
     def test_chronological_split_prevents_future_leakage(self):
         df = pd.DataFrame(
             {
-                "unit_id": ["CB_PDC_1BR_A"] * 6,
+                "unit_id": ["UNIT_A_PLAYA"] * 6,
                 "year_month": ["2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08"],
                 "month_num": [3, 4, 5, 6, 7, 8],
                 "adr_mxn": [1800, 1650, 1300, 1250, 1400, 1350],

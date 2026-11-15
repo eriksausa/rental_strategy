@@ -5,7 +5,7 @@ venv/
 __pycache__/
 *.pyc
 
-# Local SQLite / DuckDB databases & private Casa Bella records
+# Local SQLite / DuckDB databases & private booking records
 *.db
 *.duckdb
 data/*.db

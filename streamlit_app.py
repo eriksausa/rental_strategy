@@ -1,5 +1,5 @@
 """
-Casa Bella — Rental Strategy Optimizer (Playa del Carmen, Tulum & CDMX)
+Rental Strategy Optimizer (Playa del Carmen, Tulum & CDMX)
 Bilingual (English / Español) Portfolio Demo & Interactive Decision Engine
 
 Run locally with:
@@ -24,23 +24,23 @@ CFE_DAC_BASE_RATE_MXN = 6.08
 CFE_IVA_MULTIPLIER = 1.16
 
 PORTFOLIO_UNITS: Dict[str, Dict[str, object]] = {
-    "CB_PDC_1BR_A": {
-        "name_en": "Playa del Carmen — 1BR/1BA #A (Centro)",
-        "name_es": "Playa del Carmen — 1 Rec / 1 Baño #A (Centro)",
+    "UNIT_A_PLAYA": {
+        "name_en": "Unit A Playa — 1BR/1BA",
+        "name_es": "Unidad A Playa — 1 Rec / 1 Baño",
         "city": "Playa del Carmen",
-        "neighborhood": "Centro",
+        "neighborhood": "Not disclosed",
         "bedrooms": 1,
         "bathrooms": 1,
         "base_adr_mxn": 1650.0,
         "occ_multiplier": 1.00,
-        "notes_en": "Walkable to 5th Ave & beach; steady year-round digital nomad + tourist mix.",
-        "notes_es": "A pasos de la 5ta Av. y la playa; demanda constante de nómadas digitales y turistas.",
+        "notes_en": "Central location; steady year-round digital nomad + tourist mix.",
+        "notes_es": "Ubicación céntrica; demanda constante de nómadas digitales y turistas.",
     },
-    "CB_PDC_1BR_B": {
-        "name_en": "Playa del Carmen — 1BR/1BA #B (Centro)",
-        "name_es": "Playa del Carmen — 1 Rec / 1 Baño #B (Centro)",
+    "UNIT_B_PLAYA": {
+        "name_en": "Unit B Playa — 1BR/1BA",
+        "name_es": "Unidad B Playa — 1 Rec / 1 Baño",
         "city": "Playa del Carmen",
-        "neighborhood": "Gonzalo Guerrero",
+        "neighborhood": "Not disclosed",
         "bedrooms": 1,
         "bathrooms": 1,
         "base_adr_mxn": 1750.0,
@@ -48,11 +48,11 @@ PORTFOLIO_UNITS: Dict[str, Dict[str, object]] = {
         "notes_en": "Quiet residential/nomad zone; strong Facebook Group mid-term rental demand.",
         "notes_es": "Zona residencial tranquila; alta demanda de rentas de mediano plazo en grupos de Facebook.",
     },
-    "CB_PDC_2BR": {
-        "name_en": "Playa del Carmen — 2BR/2BA (Gonzalo Guerrero)",
-        "name_es": "Playa del Carmen — 2 Rec / 2 Baños (Gonzalo Guerrero)",
+    "UNIT_C_PLAYA": {
+        "name_en": "Unit C Playa — 2BR/2BA",
+        "name_es": "Unidad C Playa — 2 Rec / 2 Baños",
         "city": "Playa del Carmen",
-        "neighborhood": "Gonzalo Guerrero",
+        "neighborhood": "Not disclosed",
         "bedrooms": 2,
         "bathrooms": 2,
         "base_adr_mxn": 2550.0,
@@ -60,17 +60,17 @@ PORTFOLIO_UNITS: Dict[str, Dict[str, object]] = {
         "notes_en": "Higher winter ADR ceiling; multiple A/C units increase May–Oct CFE DAC exposure.",
         "notes_es": "Mayor tarifa por noche en invierno; múltiples aires acondicionados elevan el riesgo de tarifa CFE DAC en verano.",
     },
-    "CB_TUL_1BR": {
-        "name_en": "Tulum — 1BR/1BA (La Veleta)",
-        "name_es": "Tulum — 1 Rec / 1 Baño (La Veleta)",
+    "UNIT_TULUM": {
+        "name_en": "Unit Tulum — 1BR/1BA",
+        "name_es": "Unidad Tulum — 1 Rec / 1 Baño",
         "city": "Tulum",
-        "neighborhood": "La Veleta",
+        "neighborhood": "Not disclosed",
         "bedrooms": 1,
         "bathrooms": 1,
         "base_adr_mxn": 1550.0,
         "occ_multiplier": 0.74,
-        "notes_en": "Calibrated to ~46% annual mean occupancy; sharp May–Oct low-season compression.",
-        "notes_es": "Calibrado a ~46% de ocupación media anual; fuerte caída en temporada baja (mayo–octubre).",
+        "notes_en": "Calibrated to Tulum market-wide occupancy (~46%, AirDNA); sharp May–Oct low-season compression.",
+        "notes_es": "Calibrado a la ocupación promedio del mercado de Tulum (~46%, AirDNA); fuerte caída en temporada baja (mayo–octubre).",
     },
     "MKT_CDMX_1BR": {
         "name_en": "CDMX Benchmark — 1BR/1BA (Roma Norte)",
@@ -377,7 +377,7 @@ def parse_facebook_rental_post(raw_text: str) -> Dict[str, object]:
 # 2. Page Header, Language Switcher (EN / ES) & Portfolio Project Showcase Banner
 # ==============================================================================
 st.set_page_config(
-    page_title="Casa Bella — Rental Strategy Optimizer",
+    page_title="Rental Strategy Optimizer",
     page_icon="🏖️",
     layout="wide",
 )
@@ -413,7 +413,7 @@ st.markdown(
 with top_col1:
     if lang == "es":
         st.markdown(
-            "<h1 class='header-title'>🏖️ Casa Bella — Optimizador de Estrategia de Renta</h1>",
+            "<h1 class='header-title'>🏖️ Optimizador de Estrategia de Renta</h1>",
             unsafe_allow_html=True,
         )
         st.markdown(
@@ -424,7 +424,7 @@ with top_col1:
         )
     else:
         st.markdown(
-            "<h1 class='header-title'>🏖️ Casa Bella — Rental Strategy Optimizer</h1>",
+            "<h1 class='header-title'>🏖️ Rental Strategy Optimizer</h1>",
             unsafe_allow_html=True,
         )
         st.markdown(
@@ -441,7 +441,7 @@ if lang == "es":
     st.info(
         "🎯 **Sobre Este Proyecto (Demo Interactivo):** "
         "Construí este motor de decisiones de extremo a extremo (**SQL $\\rightarrow$ Machine Learning $\\rightarrow$ Simulación Monte Carlo $\\rightarrow$ Streamlit**) "
-        "para resolver un problema real en el negocio (**Casa Bella**, con 3 departamentos en **Playa del Carmen** y 1 en **Tulum**): "
+        "para resolver un problema real en el negocio (un negocio familiar con 3 departamentos en **Playa del Carmen** y 1 en **Tulum**): "
         "*cuando un inquilino ofrece un contrato fijo de 3 o 6 meses, ¿debemos aceptar la oferta hoy, negociar una renta más alta o dejar el calendario abierto "
         "para rentas cortas por Airbnb y grupos de Facebook?* A diferencia de calculadoras simples, este modelo incorpora la **tarifa eléctrica CFE DAC de verano** "
         "(donde el aire acondicionado eleva el recibo a `$5,500–$6,500 MXN/mes`), la mezcla de reservas directas sin comisión en **Grupos de Facebook (0%)** vs. **Airbnb (~18%)**, "
@@ -451,7 +451,7 @@ else:
     st.info(
         "🎯 **About This Project (Interactive Demo):** "
         "I built this end-to-end decision engine (**SQL $\\rightarrow$ Machine Learning $\\rightarrow$ Monte Carlo Simulation $\\rightarrow$ Streamlit**) "
-        "to solve a real operational question for a rental business (**Casa Bella**, operating 3 apartments in **Playa del Carmen** and 1 in **Tulum**): "
+        "to solve a real operational question for a family rental business operating 3 apartments in **Playa del Carmen** and 1 in **Tulum**): "
         "*when a prospective tenant offers a guaranteed 3-month or 6-month lease, should we accept the contract today, negotiate a higher rate, or keep the calendar open "
         "for short-term stays across Airbnb and Facebook Groups?* Unlike basic revenue calculators, this engine models Quintana Roo's **May–Oct CFE DAC summer electricity trap** "
         "(`$5,500–$6,500 MXN/mo` in A/C bills paid by the host on short-term stays vs. paid by the tenant on a lease), blends **0%-fee Facebook Group direct bookings** with **Airbnb (~18% fee)**, "
@@ -461,16 +461,16 @@ else:
 # Scenario Preset Selector
 if lang == "es":
     preset_options = [
-        "Escenario 1: Trampa CFE DAC de Verano (Tulum 1 Rec · May–Oct · Oferta 6 Meses @ $25,000 MXN/mes)",
-        "Escenario 2: Temporada Alta de Invierno (Playa 2 Rec/2 Baños · Nov–Abr · Oferta 6 Meses @ $30,000 MXN/mes)",
-        "Escenario 3: Decisión Cerrada en Transición (Playa 1 Rec Centro · Abr–Jun · Oferta 3 Meses @ $23,500 MXN/mes)",
+        "Escenario 1: Trampa CFE DAC de Verano (Unidad Tulum · May–Oct · Oferta 6 Meses @ $25,000 MXN/mes)",
+        "Escenario 2: Temporada Alta de Invierno (Unidad C Playa · Nov–Abr · Oferta 6 Meses @ $30,000 MXN/mes)",
+        "Escenario 3: Decisión Cerrada en Transición (Unidad A Playa · Abr–Jun · Oferta 3 Meses @ $23,500 MXN/mes)",
     ]
     preset_label = "🎬 Selecciona un Escenario Demo Preconfigurado (o personaliza todos los costos en el panel izquierdo):"
 else:
     preset_options = [
-        "Scenario 1: Summer CFE DAC Trap (Tulum 1BR · May–Oct · 6M Offer @ $25,000 MXN/mo)",
-        "Scenario 2: Peak Winter High Season (Playa 2BR/2BA · Nov–Apr · 6M Offer @ $30,000 MXN/mo)",
-        "Scenario 3: Split Season Close Call (Playa 1BR Centro · Apr–Jun · 3M Offer @ $23,500 MXN/mo)",
+        "Scenario 1: Summer CFE DAC Trap (Unit Tulum · May–Oct · 6M Offer @ $25,000 MXN/mo)",
+        "Scenario 2: Peak Winter High Season (Unit C Playa · Nov–Apr · 6M Offer @ $30,000 MXN/mo)",
+        "Scenario 3: Split Season Close Call (Unit A Playa · Apr–Jun · 3M Offer @ $23,500 MXN/mo)",
     ]
     preset_label = "🎬 Load a Demo Scenario Preset (or customize every cost input in the left sidebar):"
 
@@ -784,10 +784,10 @@ with tab_story:
         with c1:
             st.markdown(
                 """
-                #### 1. El Problema Real de Nuestro Negocio Familiar (Casa Bella)
-                Este es mi proyecto de portafolio de **Ciencia de Datos y Machine Learning**, diseñado como una herramienta real para **Casa Bella**, donde administramos **4 departamentos en la Riviera Maya**:
-                - **Playa del Carmen (`Centro` y `Gonzalo Guerrero`)**: Dos departamentos de **1 Rec / 1 Baño** y uno de **2 Rec / 2 Baños**.
-                - **Tulum (`La Veleta`)**: Un departamento de **1 Rec / 1 Baño** (~46% de ocupación media anual).
+                #### 1. El Problema Real de Nuestro Negocio Familiar
+                Este es mi proyecto de portafolio de **Ciencia de Datos y Machine Learning**, diseñado como una herramienta real para nuestro negocio familiar, donde administramos **4 departamentos en la Riviera Maya**:
+                - **Playa del Carmen**: Unidad A y Unidad B (**1 Rec / 1 Baño**) y Unidad C (**2 Rec / 2 Baños**).
+                - **Tulum**: Unidad Tulum (**1 Rec / 1 Baño**).
 
                 Cada temporada recibimos ofertas de nómadas digitales que buscan rentar por **3 o 6 meses** a tarifa fija. Mirar solo la tarifa por noche de Airbnb engaña, porque en renta corta el propietario absorbe comisiones, limpiezas, vacancia y electricidad.
                 """
@@ -812,10 +812,10 @@ with tab_story:
         with c1:
             st.markdown(
                 """
-                #### 1. The Real Family-Business Problem (Casa Bella)
-                This is my **Data Science & Machine Learning portfolio project**, built as a live decision tool for **Casa Bella**, our family's **4 rental apartments in the Riviera Maya**:
-                - **Playa del Carmen (`Centro` & `Gonzalo Guerrero`)**: Two **1BR/1BA** units and one **2BR/2BA** unit.
-                - **Tulum (`La Veleta`)**: One **1BR/1BA** unit (~46% annual mean occupancy).
+                #### 1. The Real Family-Business Problem
+                This is my **Data Science & Machine Learning portfolio project**, built as a live decision tool for our family's **4 rental apartments in the Riviera Maya**:
+                - **Playa del Carmen**: Unit A and Unit B (**1BR/1BA**) and Unit C (**2BR/2BA**).
+                - **Tulum**: Unit Tulum (**1BR/1BA**).
 
                 Every season, remote workers and expats offer fixed **3-month or 6-month leases**. Comparing gross nightly Airbnb rates against a monthly lease is misleading because short-term stays carry heavy variable drags that disappear on a mid-term contract.
                 """
@@ -844,10 +844,10 @@ with tab_ml:
     st.markdown(
         """
         ```text
-        [Casa Bella Reservation CSV + Cached AirROI JSON ($0 Re-Run Cost)]
+        [Reservation CSV + Cached AirROI JSON ($0 Re-Run Cost)]
                                       │
                                       ▼
-        [SQLite / DuckDB (`properties`, `casa_bella_reservations`, `monthly_history`)]
+        [SQLite / DuckDB (`properties`, `reservations`, `monthly_history`)]
                                       │
                                       ▼
         [Model A: Nightly ADR (XGBoost/RF)  +  Model B: Monthly Occupancy % (XGBoost/RF)]
@@ -884,9 +884,9 @@ with tab_fb:
         else "Instead of risking your personal Facebook account with automated scrapers in closed groups, paste any raw listing text from a Playa del Carmen or Tulum Facebook group below:"
     )
     default_fb_text = (
-        "Disponible 1 de mayo! Hermoso depto 1 recámara en Gonzalo Guerrero, Playa del Carmen. Alberca en rooftop y WiFi fibra. $24,500 MXN/mes + CFE luz aparte. Contrato 3 o 6 meses."
+        "Disponible 1 de mayo! Hermoso depto 1 recámara en Aldea Zama, Tulum. Alberca en rooftop y WiFi fibra. $24,500 MXN/mes + CFE luz aparte. Contrato 3 o 6 meses."
         if lang == "es"
-        else "Available May 1st! Beautiful 1BR apartment in Gonzalo Guerrero, Playa del Carmen. Rooftop pool & fiber WiFi. $24,500 MXN/mes + CFE electric. Minimum 3 or 6 months."
+        else "Available May 1st! Beautiful 1BR apartment in Aldea Zama, Tulum. Rooftop pool & fiber WiFi. $24,500 MXN/mes + CFE electric. Minimum 3 or 6 months."
     )
     sample_post = st.text_area(
         "Pega el texto de la publicación de Facebook:" if lang == "es" else "Paste raw Facebook Group post text:",

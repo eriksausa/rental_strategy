@@ -1,7 +1,7 @@
 """
 Phase 3: Financial Decision Engine & Monte Carlo Cash-Flow Simulator.
 All unit costs (HOA, cleaning, Wi-Fi, OTA fee %, Facebook direct share, and CFE
-electricity) are explicit user inputsâ€”zero hidden cost assumptions.
+electricity) are explicit user inputs—zero hidden cost assumptions.
 """
 from dataclasses import dataclass
 from typing import Dict, List
