@@ -112,7 +112,7 @@ with top_col1:
 if lang == "es":
     st.warning(
         "⚠️ **Demo Público (Datos Sintéticos Ilustrativos):** "
-        "Para proteger la privacidad del negocio familiar y de los huéspedes, este repositorio utiliza **datos mensuales sintéticos** "
+        "Para proteger la privacidad del negocio y de los huéspedes, este repositorio utiliza **datos mensuales sintéticos** "
         "(`source = 'synthetic_demo'`) para 4 unidades ilustrativas (**Unidad A Playa**, **Unidad B Playa**, **Unidad C Playa** y **Unidad Tulum**). "
         "Las cifras de mercado (como el ~46% de ocupación anual en Tulum y ~58% en Playa del Carmen) provienen de benchmarks públicos de **AirDNA (2026)**."
     )
@@ -127,7 +127,7 @@ if lang == "es":
 else:
     st.warning(
         "⚠️ **Public Demo (Illustrative Synthetic Inputs):** "
-        "To protect family-business and guest privacy, this repository uses **synthetic monthly history** (`source = 'synthetic_demo'`) "
+        "To protect business and guest privacy, this repository uses **synthetic monthly history** (`source = 'synthetic_demo'`) "
         "for 4 anonymized units (**Unit A Playa**, **Unit B Playa**, **Unit C Playa**, and **Unit Tulum**). "
         "Market-level reference figures (such as Tulum's ~46% and Playa del Carmen's ~58% annual mean occupancy) are cited from public **AirDNA (2026)** benchmarks."
     )
