@@ -15,7 +15,6 @@ data/private/
 !data/private/.gitkeep
 
 # Git history helper script & OS/IDE files
-build_git_history.ps1
 .DS_Store
 .vscode/
 .pytest_cache/
