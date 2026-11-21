@@ -1,13 +1,17 @@
 """
 Rental Strategy Optimizer — Core Engine Package (`src/rental_engine`).
 
-Provides:
-  - `assumptions`: Explicit, cited domain and simulation constants + public AirDNA benchmarks.
-  - `cfe`: 12-month rolling-average CFE DAC electricity classification and billing.
-  - `data`: Synthetic SQLite builder & optional AirROI cached market adapter.
-  - `models`: Chronological train/test split, Baseline / RandomForest / XGBoost training & residual backtesting.
+Modules:
+  - `assumptions`: Explicit domain constants, CFE tariff limits, and cited AirDNA benchmarks.
+  - `transforms`: Shared logit, inverse-logit, and Laplace occupancy smoothing helpers.
+  - `cfe`: 12-month rolling-average CFE DAC electricity classifier and bill calculator.
+  - `synthetic_panel`: Deterministic 12-unit x 48-month synthetic panel with known elasticity.
+  - `forecasting`: Leak-free rolling-origin (walk-forward) backtest and OOF residual generator.
+  - `elasticity`: Naive vs. fixed-effects price-response estimator with unit cluster bootstrap.
+  - `forecast_service`: Loads saved artifacts and maps lease windows to point forecasts + residual blocks.
   - `engine`: Break-even occupancy, blended OTA fee drag, and Monte Carlo lease-vs-STR simulator.
-  - `fb_parser`: Copy-paste Facebook Group rental listing parser.
+  - `reporting`: Reproducible Markdown report builder for backtest and elasticity results.
+  - `fb_parser`: Safe copy-paste Facebook Group rental listing parser.
 """
 
 from .assumptions import (
@@ -31,6 +35,7 @@ from .engine import (
     simulate_lease_vs_str,
 )
 from .fb_parser import parse_facebook_rental_post
+from .transforms import inv_logit, logit, smooth_occupancy
 
 __all__ = [
     "AIRDNA_PUBLIC_BENCHMARKS",
@@ -45,7 +50,10 @@ __all__ = [
     "days_in_month",
     "estimate_cfe_monthly_bill",
     "evaluate_12m_dac_trajectory",
+    "inv_logit",
     "is_dac_reclassified",
+    "logit",
     "parse_facebook_rental_post",
     "simulate_lease_vs_str",
+    "smooth_occupancy",
 ]

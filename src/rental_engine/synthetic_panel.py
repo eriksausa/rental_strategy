@@ -34,7 +34,7 @@ biased; fixed effects remove the shock (see `elasticity.py`).
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -45,26 +45,28 @@ from .assumptions import (
     BASE_SEASONAL_OCC_CURVE,
     PORTFOLIO_UNITS,
 )
+from .transforms import inv_logit, logit
 
 
 @dataclass(frozen=True)
 class TrueParams:
-    """Parameters of the synthetic generator (the 'ground truth')."""
-    elasticity: float = -1.6          # d log-odds(occupancy) / d log(price), own-price response
-    pass_through: float = 0.5         # share of the market shock hosts pass into prices
-    shock_phi: float = 0.6            # AR(1) persistence of the market demand shock
-    shock_sd: float = 0.12            # innovation sd of the market shock (log-odds units)
-    price_noise_sd: float = 0.15      # host pricing deviations (exogenous price variation)
-    occ_noise_sd: float = 0.10        # idiosyncratic demand noise (log-odds units)
-    trend_adr_per_month: float = 0.004
+    """Ground-truth structural parameters of the synthetic data-generating process."""
+
+    elasticity: float = -1.6          # d logit(occ) / d log(ADR), own-price response
+    pass_through: float = 0.5         # Share of the market demand shock passed into posted prices
+    shock_phi: float = 0.6            # AR(1) month-to-month persistence of the market shock
+    shock_sd: float = 0.12            # Innovation std of the market shock (log-odds scale)
+    price_noise_sd: float = 0.15      # Exogenous host pricing deviations (log-MXN scale)
+    occ_noise_sd: float = 0.10        # Idiosyncratic demand noise (log-odds scale)
+    trend_adr_per_month: float = 0.004  # ~4.9% annual nominal ADR drift
     trend_occ_per_month: float = 0.0
 
 
-# City-level settings (CDMX has weaker seasonality than the beach markets).
-_CITY_AMP = {"Playa del Carmen": 1.00, "Tulum": 1.00, "CDMX": 0.40}
-_CITY_BASE_ADR_1BR = {"Playa del Carmen": 1650.0, "Tulum": 1550.0, "CDMX": 1850.0}
+# Seasonal amplitude per city (urban CDMX has much flatter seasonality than beach markets).
+_CITY_SEASONAL_AMP: Dict[str, float] = {"Playa del Carmen": 1.00, "Tulum": 1.00, "CDMX": 0.40}
+_CITY_BASE_ADR_1BR: Dict[str, float] = {"Playa del Carmen": 1650.0, "Tulum": 1550.0, "CDMX": 1850.0}
 
-# Extra illustrative units so the panel has enough cross-sectional variation.
+# Seven extra synthetic units give the panel 12 units total for cross-sectional fixed effects.
 _EXTRA_UNITS: List[Tuple[str, str, int]] = [
     ("SYN_PDC_04", "Playa del Carmen", 1),
     ("SYN_PDC_05", "Playa del Carmen", 2),
@@ -77,17 +79,36 @@ _EXTRA_UNITS: List[Tuple[str, str, int]] = [
 
 
 def default_units() -> List[Tuple[str, str, int, Optional[float]]]:
-    """(unit_id, city, bedrooms, base_adr_or_None) for the 5 portfolio units plus 7 synthetic extras."""
+    """Return `(unit_id, city, bedrooms, base_adr_or_None)` for 5 portfolio units + 7 extras."""
     units: List[Tuple[str, str, int, Optional[float]]] = [
-        (uid, str(u["city"]), int(u["bedrooms"]), float(u["base_adr_mxn"])) for uid, u in PORTFOLIO_UNITS.items()
+        (uid, str(info["city"]), int(info["bedrooms"]), float(info["base_adr_mxn"]))
+        for uid, info in PORTFOLIO_UNITS.items()
     ]
     units += [(uid, city, beds, None) for uid, city, beds in _EXTRA_UNITS]
     return units
 
 
-def _logit(p):
-    p = np.clip(p, 1e-6, 1 - 1e-6)
-    return np.log(p / (1.0 - p))
+def _centered_seasonal_curves() -> Tuple[Dict[int, float], Dict[int, float]]:
+    """Convert raw monthly curves to zero-mean log-odds (occ) and log-multiplier (ADR) profiles."""
+    raw_occ = {m: float(logit(np.array(p))) for m, p in BASE_SEASONAL_OCC_CURVE.items()}
+    mean_occ = float(np.mean(list(raw_occ.values())))
+    season_occ = {m: val - mean_occ for m, val in raw_occ.items()}
+
+    raw_adr = {m: float(np.log(mult)) for m, mult in BASE_SEASONAL_ADR_MULT.items()}
+    mean_adr = float(np.mean(list(raw_adr.values())))
+    season_adr = {m: val - mean_adr for m, val in raw_adr.items()}
+    return season_occ, season_adr
+
+
+def _simulate_market_shock(rng: np.random.Generator, n_months: int, params: TrueParams) -> np.ndarray:
+    """Simulate a stationary AR(1) market-wide demand shock shared across all units."""
+    shock = np.zeros(n_months)
+    # Draw t=0 from the stationary marginal variance: sigma^2 / (1 - phi^2).
+    stationary_sd = params.shock_sd / np.sqrt(1.0 - params.shock_phi ** 2)
+    shock[0] = rng.normal(0.0, stationary_sd)
+    for t in range(1, n_months):
+        shock[t] = params.shock_phi * shock[t - 1] + rng.normal(0.0, params.shock_sd)
+    return shock
 
 
 def generate_panel(
@@ -97,11 +118,13 @@ def generate_panel(
     units: Optional[List[Tuple[str, str, int, Optional[float]]]] = None,
     params: TrueParams = TrueParams(),
 ) -> pd.DataFrame:
-    """Balanced synthetic panel, one row per unit-month.
+    """Generate a deterministic, balanced synthetic unit-month panel.
 
-    Columns: unit_id, city, bedrooms, year_month, month_num, t, days_in_month, adr_mxn,
-             occupancy_rate, nights_occupied, p_true.
-    `p_true` (latent occupancy probability) is kept only for diagnostics; it is never a feature.
+    Returns:
+        DataFrame with columns `unit_id`, `city`, `bedrooms`, `year_month`, `month_num`,
+        `t`, `days_in_month`, `adr_mxn`, `occupancy_rate`, `nights_occupied`, `p_true`.
+        `p_true` (latent occupancy probability) is stored for noise-floor diagnostics only
+        and is never used as a model feature.
     """
     units = units or default_units()
     rng = np.random.default_rng(seed)
@@ -109,45 +132,58 @@ def generate_panel(
     month_nums = np.array([p.month for p in periods])
     days = np.array([p.days_in_month for p in periods])
 
-    season_occ = {m: float(_logit(np.array(p))) for m, p in BASE_SEASONAL_OCC_CURVE.items()}
-    mean_season = float(np.mean(list(season_occ.values())))
-    season_occ = {m: v - mean_season for m, v in season_occ.items()}
-    season_adr = {m: float(np.log(v)) for m, v in BASE_SEASONAL_ADR_MULT.items()}
-    mean_adr = float(np.mean(list(season_adr.values())))
-    season_adr = {m: v - mean_adr for m, v in season_adr.items()}
-
-    u = np.zeros(n_months)
-    u[0] = rng.normal(0.0, params.shock_sd / np.sqrt(1.0 - params.shock_phi ** 2))
-    for t in range(1, n_months):
-        u[t] = params.shock_phi * u[t - 1] + rng.normal(0.0, params.shock_sd)
+    season_occ, season_adr = _centered_seasonal_curves()
+    market_shock = _simulate_market_shock(rng, n_months, params)
 
     rows = []
     for unit_id, city, bedrooms, base_adr in units:
-        amp = _CITY_AMP[city]
+        seasonal_amp = _CITY_SEASONAL_AMP[city]
         if base_adr is None:
-            base_adr = _CITY_BASE_ADR_1BR[city] * (1.0 if bedrooms == 1 else 1.45) * float(np.exp(rng.normal(0.0, 0.08)))
-        log_base = float(np.log(base_adr))
-        occ_level = float(_logit(np.array(AIRDNA_PUBLIC_BENCHMARKS[city]["annual_mean_occupancy"])))
-        a_i = occ_level + rng.normal(0.0, 0.25)
+            # 2BR units carry a ~45% ADR premium over 1BR, with small unit-specific dispersion.
+            bedroom_mult = 1.0 if bedrooms == 1 else 1.45
+            base_adr = _CITY_BASE_ADR_1BR[city] * bedroom_mult * float(np.exp(rng.normal(0.0, 0.08)))
+        log_base_adr = float(np.log(base_adr))
+
+        # Anchor unit-level baseline occupancy to the cited AirDNA city benchmark.
+        city_occ_log_odds = float(logit(np.array(AIRDNA_PUBLIC_BENCHMARKS[city]["annual_mean_occupancy"])))
+        unit_occ_intercept = city_occ_log_odds + rng.normal(0.0, 0.25)
+
         for t in range(n_months):
-            m = int(month_nums[t])
-            ref = log_base + amp * season_adr[m] + params.trend_adr_per_month * t
-            logp = ref + params.pass_through * u[t] + rng.normal(0.0, params.price_noise_sd)
-            z = (a_i + amp * season_occ[m] + params.trend_occ_per_month * t + u[t]
-                 + params.elasticity * (logp - ref) + rng.normal(0.0, params.occ_noise_sd))
-            p_true = 1.0 / (1.0 + np.exp(-z))
+            month = int(month_nums[t])
+            ref_log_price = log_base_adr + seasonal_amp * season_adr[month] + params.trend_adr_per_month * t
+            # Posted price reflects both the shared market shock (confounder) and exogenous host pricing noise.
+            posted_log_price = (
+                ref_log_price
+                + params.pass_through * market_shock[t]
+                + rng.normal(0.0, params.price_noise_sd)
+            )
+            demand_log_odds = (
+                unit_occ_intercept
+                + seasonal_amp * season_occ[month]
+                + params.trend_occ_per_month * t
+                + market_shock[t]
+                + params.elasticity * (posted_log_price - ref_log_price)
+                + rng.normal(0.0, params.occ_noise_sd)
+            )
+            p_true = float(inv_logit(demand_log_odds))
+            # Realized occupancy is a discrete count of booked nights out of the month's calendar days.
             nights = int(rng.binomial(int(days[t]), p_true))
             rows.append(
                 {
-                    "unit_id": unit_id, "city": city, "bedrooms": bedrooms,
-                    "year_month": str(periods[t]), "month_num": m, "t": t,
+                    "unit_id": unit_id,
+                    "city": city,
+                    "bedrooms": bedrooms,
+                    "year_month": str(periods[t]),
+                    "month_num": month,
+                    "t": t,
                     "days_in_month": int(days[t]),
-                    "adr_mxn": round(float(np.exp(logp)), 2),
+                    "adr_mxn": round(float(np.exp(posted_log_price)), 2),
                     "occupancy_rate": nights / float(days[t]),
                     "nights_occupied": nights,
-                    "p_true": float(p_true),
+                    "p_true": p_true,
                 }
             )
+
     df = pd.DataFrame(rows)
     df.attrs["true_params"] = asdict(params)
     df.attrs["synthetic"] = True

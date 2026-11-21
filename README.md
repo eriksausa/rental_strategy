@@ -1,6 +1,6 @@
 # Rental Strategy Optimizer — Riviera Maya & CDMX
 
-An end-to-end decision engine (**SQLite $\rightarrow$ Chronological ML Backtesting $\rightarrow$ 5,000-Run Monte Carlo Simulation $\rightarrow$ Bilingual Streamlit UI**) that evaluates whether a property owner in **Playa del Carmen** or **Tulum** should **accept a guaranteed 3-month or 6-month lease**, **negotiate a higher monthly rate**, or **keep the calendar open** for short-term stays (Airbnb + 0%-fee Facebook Group direct bookings).
+An end-to-end decision engine (**Walk-Forward ML Backtesting $\rightarrow$ 5,000-Run Block-Bootstrap Monte Carlo Simulation $\rightarrow$ Bilingual Streamlit UI**) that evaluates whether a property owner in **Playa del Carmen** or **Tulum** should **accept a guaranteed 3-month or 6-month lease**, **negotiate a higher monthly rate**, or **keep the calendar open** for short-term stays (Airbnb + 0%-fee Facebook Group direct bookings).
 
 🔗 **Live Interactive Demo (English / Español):** [https://casabella-eriksausa.streamlit.app/](https://casabella-eriksausa.streamlit.app/)
 
@@ -9,9 +9,9 @@ An end-to-end decision engine (**SQLite $\rightarrow$ Chronological ML Backtesti
 ## 1. Synthetic Demo Data & Privacy Note
 
 To protect business and guest privacy, no real booking records, guest PII, or proprietary unit databases are stored in this repository:
-- `src/rental_engine/data.py` generates a deterministic synthetic monthly history (`source = 'synthetic_demo'`) for four anonymized Riviera Maya apartments (**Unit A Playa**, **Unit B Playa**, **Unit C Playa**, and **Unit Tulum**) plus an urban benchmark (**CDMX Roma Norte**).
+- `src/rental_engine/synthetic_panel.py` generates a deterministic **12-unit × 48-month** synthetic monthly panel covering four anonymized Riviera Maya apartments (**Unit A Playa**, **Unit B Playa**, **Unit C Playa**, and **Unit Tulum**), an urban benchmark (**CDMX Roma Norte**), and seven extra cross-sectional units.
 - Market-level anchors—such as **Tulum's ~46% annual mean occupancy ($125 ADR)** and **Playa del Carmen's ~58% annual mean occupancy ($103 ADR)**—are cited from public **AirDNA MarketMinder (2026)** summaries.
-- `fetch_airroi_market_cached()` in `src/rental_engine/data.py` preserves an offline-first adapter for cached AirROI JSON responses (`data/raw/`) so private market pulls can be integrated locally without API credit waste (`use_live_api=False` by default).
+- `sql/schema_and_eda.sql` preserves the SQLite/DuckDB schema and owner-block-adjusted reservation rollup query for plugging in private operating data locally.
 
 ---
 
@@ -37,63 +37,61 @@ All modeling constants live in the frozen `Assumptions` dataclass in [`src/renta
 | `cfe_tariff` / `cfe_dac_threshold_kwh` | `"1B"` / `400.0 kWh/mo` | CFE Tarifa 1B 12-month rolling average limit (accessed 2026-11-15); Tariffs `1`..`1F` (`250`–`2,500 kWh/mo`) also mapped |
 | `cfe_dac_rate_mxn_per_kwh` | `6.08 MXN/kWh` (+16% IVA) | CFE Peninsular unsubsidized DAC energy rate before IVA |
 | `cfe_dac_fixed_charge_mxn` | `145.79 MXN/mo` (+16% IVA) | CFE Peninsular monthly fixed charge before IVA (optional in kWh trajectory mode) |
-| `cfe_subsidized_rate_mxn_per_kwh` | `1.85 MXN/kWh` (+16% IVA) | Blended subsidized Tariff 1B rate below the DAC rolling threshold |
-| `adr_std_mxn` / `occ_std` | Computed from ML backtest residuals | Out-of-time test residuals (`year_month > 2025-06`); fallbacks `180.0 MXN` and `0.08` |
+| `cfe_subsidized_rate_mxn_per_kwh` | `1.85 MXN/kWh` (+16% IVA) | Blended subsidized Tariff 1B rate before IVA |
+| Forecast uncertainty (block bootstrap) | Centered OOF residual blocks | Resampled from 1,656 out-of-fold walk-forward forecasts; fallbacks `180.0 MXN` / `0.08` when running standalone |
 | `min_sampled_adr_mxn` | `300.0 MXN` | Lower truncation bound on simulated nightly ADR draws |
-| `min_sampled_occ_rate` / `max_sampled_occ_rate` | `0.05` (5%) / `0.98` (98%) | Physical occupancy bounds applied to Monte Carlo normal draws |
+| `min_sampled_occ_rate` / `max_sampled_occ_rate` | `0.05` (5%) / `0.98` (98%) | Physical occupancy bounds applied to Monte Carlo draws |
 | `accept_lease_max_str_win_prob` | `0.45` (45%) | Recommend `ACCEPT CONTRACT` when `Lease Net >= P50 STR` and `P(STR > Lease) < 0.45` |
 | `keep_open_min_str_win_prob` | `0.65` (65%) | Recommend `KEEP CALENDAR OPEN` when `P(STR > Lease) > 0.65` |
 | `counter_offer_risk_premium` | `1.05` (+5%) | Risk-premium markup over indifference monthly rent for counter-offers |
 
 ---
 
-## 4. Machine Learning Pipeline & Limitations
+## 4. Walk-Forward Forecasting, Price Elasticity & Dependent Uncertainty
 
-### Chronological Training & Residual Backtesting (`src/rental_engine/models.py`)
-- **Strict Temporal Split**: `chronological_train_test_split()` partitions the panel at `cutoff_year_month = "2025-06"` (`90` training unit-months through June 2025, `30` out-of-time test unit-months from July to December 2025).
-- **Models Fitted**: Compares a leak-free `SeasonalMedianBaseline` against `RandomForestRegressor` (`scikit-learn`) and `XGBRegressor` (`xgboost`) for both **Model A (Nightly ADR in MXN)** and **Model B (Monthly Occupancy Rate)**.
-- **Data-Driven Monte Carlo Spread**: Out-of-time residual standard deviations ($\sigma_{\text{ADR}}$ and $\sigma_{\text{Occ}}$) from the test partition are passed directly into `simulate_lease_vs_str()`.
+`python scripts/run_forecast_pipeline.py` (about one minute, no network) builds the synthetic panel, runs a strict rolling-origin backtest, estimates own-price elasticity, and writes committed artifacts so the app starts instantly. Full tables: [`reports/forecast_report.md`](reports/forecast_report.md).
 
-### Walk-forward Forecasting, Price Elasticity & Dependent Uncertainty
-The single split above has only 30 test unit-months, so it can verify the pipeline but not compare models. `python scripts/run_forecast_pipeline.py` (about one minute, no network) adds a larger **synthetic panel with a known price response** and a proper rolling-origin evaluation. Full tables: [`reports/forecast_report.md`](reports/forecast_report.md).
-
-- **Panel** (`synthetic_panel.py`): 12 units x 48 months, anchored on the cited AirDNA occupancy figures and the seasonal curves in `assumptions.py`. A shared AR(1) market shock raises both prices and demand; the true price response (beta = -1.6 on log-odds) is set in the generator.
-- **Backtest** (`forecasting.py`): 17 rolling origins, horizons 1-12 months, 1,656 out-of-fold unit-month forecasts per model. Baselines: seasonal naive, seasonal naive + recent drift, unit x calendar-month mean. Models: random forest and gradient boosting, trained only on targets already observed at each origin (a test checks that changing future data cannot change a forecast).
-- **Result, honestly:** gradient boosting beats the best baseline on ADR by 3.4% overall (6.0% at 1-3 months) but not on occupancy, where the unit x calendar-month mean wins. Occupancy MAE is 9.3 points against a noise floor of 6.8 points for a forecaster that knew the true probability.
-- **Price elasticity** (`elasticity.py`): the naive regression of occupancy on price gives **+1.06** (wrong sign, because high season means both high prices and high occupancy). Unit x calendar-month plus year-month fixed effects give **-1.70** (95% cluster-bootstrap CI -1.99 to -1.40), recovering the true -1.6.
-- **Dependent uncertainty** (`forecast_service.py`, `engine.py`): out-of-fold residuals of the chosen models are resampled in windows (block bootstrap) instead of drawing each month independently. For `UNIT_A_PLAYA`, May-October, the P10-P90 range of short-term net income falls from 41,800 to 22,600 MXN. Decomposing it (`python scripts/demo_uncertainty.py`): the driver is the **-0.50 correlation between ADR and occupancy errors** (a natural hedge in revenue); persistence across months is weak (lag-1 correlation +0.16 ADR, +0.04 occupancy). That negative correlation is built into this generator, so treat the numbers as a demonstration of the method, not a market estimate.
-- **In the app:** a sidebar toggle switches between this method and the original single-split, independent-normal one; lease windows beyond 12 months after the last observed month fall back to the original method.
+- **Panel** (`synthetic_panel.py`): 12 units × 48 months, anchored on the cited AirDNA occupancy figures and the seasonal curves in `assumptions.py`. A shared AR(1) market shock raises both prices and demand; the true price response (`beta = -1.6` on log-odds) is set in the generator.
+- **Backtest** (`forecasting.py`): 17 rolling origins, horizons 1–12 months, 1,656 out-of-fold unit-month forecasts per model. Baselines: seasonal naive, seasonal naive + recent drift, unit × calendar-month mean. Models: random forest and gradient boosting, trained strictly on pairs whose `target <= origin` (verified by a tamper test in `tests/test_forecasting.py`).
+- **Result, honestly:** gradient boosting beats the best baseline on ADR by 3.4% overall (6.0% at 1–3 months) but not on occupancy, where the unit × calendar-month mean wins. Occupancy MAE is 9.3 points against a noise floor of 6.8 points for a forecaster that knew the true latent probability.
+- **Price elasticity** (`elasticity.py`): naive pooled OLS of occupancy on price gives **+1.06** (wrong sign, because high season means both high prices and high occupancy). Unit × calendar-month plus year-month fixed effects give **-1.70** (95% cluster-bootstrap CI `-1.99` to `-1.40`), recovering the true `-1.6`.
+- **Dependent uncertainty** (`forecast_service.py`, `engine.py`): centered out-of-fold residuals of the chosen models are resampled in contiguous horizon windows (**block bootstrap**) instead of drawing each month independently. For `UNIT_A_PLAYA`, May–October, the P10–P90 range of short-term net income narrows from ~41,800 to ~22,600 MXN (`python scripts/demo_uncertainty.py`), driven by the **-0.50 within-month correlation between ADR and occupancy errors** (a natural revenue hedge). Because that dependence is built into the synthetic generator, treat the numbers as a demonstration of the method, not a market estimate.
+- **In the app:** a sidebar toggle switches between **block-bootstrap uncertainty** and **independent normal draws** using the same walk-forward point forecasts.
 
 ### Known Limitations
-1. **Synthetic Demo Panel Circularity**: Because the public repo ships with synthetic monthly history generated around seasonal curves (`src/rental_engine/data.py`), the out-of-time backtest metrics in the demo verify pipeline correctness and leak-free temporal splitting rather than real-world predictive accuracy. Plugging in private historical reservation rollups via `sql/schema_and_eda.sql` recalibrates both the point forecasts and residual uncertainty automatically.
-2. **Independent Monthly Normal Draws (fallback method)**: the original path draws monthly ADR and occupancy perturbations independently, which ignores both the ADR/occupancy dependence and serial correlation (e.g., hurricane closures or sargassum waves). The walk-forward block bootstrap above addresses this when artifacts are available, but its dependence structure comes from the synthetic generator in the demo.
-3. **Simplified Tiered Subsidized CFE Billing**: Below the 400 kWh/month 12-month rolling DAC threshold, CFE Tariff 1B uses stepped basic/intermediate/surplus kWh tiers that vary between summer and non-summer months; `cfe.py` approximates non-DAC billing with a single blended subsidized rate (`1.85 MXN/kWh + 16% IVA`).
-4. **Scraped Calendar Block Bias**: Third-party Airbnb datasets (AirROI / InsideAirbnb) cannot distinguish paid guest stays from owner maintenance blocks; `sql/schema_and_eda.sql` separates `stay_type = 'guest'` from `stay_type = 'owner_block'` when rolling up private reservations.
+1. **Synthetic Demo Panel**: Everything shipped in this public repo is generated from a stylized DGP (seasonality, unit effects, one AR(1) market shock). Results validate the leak-free pipeline and econometric identification rather than real-market accuracy.
+2. **Simplified Tiered Subsidized CFE Billing**: Below the 400 kWh/month 12-month rolling DAC threshold, CFE Tariff 1B uses stepped basic/intermediate/surplus tiers; `cfe.py` approximates non-DAC billing with a single blended subsidized rate (`1.85 MXN/kWh + 16% IVA`).
+3. **Scraped Calendar Block Bias**: Third-party Airbnb datasets cannot distinguish paid guest stays from owner maintenance blocks; `sql/schema_and_eda.sql` separates `stay_type = 'guest'` from `stay_type = 'owner_block'` when rolling up private reservations.
 
 ---
 
 ## 5. Repository Structure & Quickstart
 
 ```text
-streamlit_app.py                # Single Streamlit entry point (bilingual EN/ES UI)
+streamlit_app.py                # Thin Streamlit entry point (bilingual EN/ES app)
 src/rental_engine/
   ├── assumptions.py            # Explicit Assumptions dataclass + cited AirDNA benchmarks
+  ├── transforms.py             # Shared logit, inverse-logit & Laplace occupancy smoothing
   ├── cfe.py                    # 12-month rolling-average CFE DAC classifier & bill calculator
-  ├── data.py                   # Synthetic SQLite builder + cached AirROI adapter
-  ├── models.py                 # Chronological split, Baseline/RF/XGB training & residual stds
-  ├── synthetic_panel.py        # 12 units x 48 months synthetic panel with a known price response
-  ├── forecasting.py            # Rolling-origin backtest, final forecasts, out-of-fold residuals
-  ├── elasticity.py             # Naive vs fixed-effects price-response estimates with bootstrap CI
-  ├── forecast_service.py       # Artifacts -> engine inputs (forecast windows, residual blocks)
-  ├── reporting.py              # Markdown report builder
+  ├── synthetic_panel.py        # 12 units x 48 months synthetic panel with known price response
+  ├── forecasting.py            # Rolling-origin backtest, final forecasts, centered OOF residuals
+  ├── elasticity.py             # Naive vs. fixed-effects price-response estimator + bootstrap CI
+  ├── forecast_service.py       # Artifacts -> engine inputs (forecast windows & residual blocks)
   ├── engine.py                 # Break-even occupancy & Monte Carlo lease-vs-STR simulator
-  └── fb_parser.py              # Safe copy-paste Facebook Group post parser
+  ├── reporting.py              # Reproducible Markdown report builder
+  └── fb_parser.py              # Safe copy-paste Facebook Group rental listing parser
+src/ui/
+  ├── i18n.py                   # Bilingual EN/ES helpers & header/banner copy
+  ├── presets.py                # Typed ScenarioPreset definitions
+  ├── sidebar.py                # Sidebar input controls -> typed SidebarInputs
+  ├── charts.py                 # Plotly Monte Carlo histogram & monthly comparison bar chart
+  └── tabs.py                   # Tab 1–4 presentation renderers
 scripts/
   ├── run_forecast_pipeline.py  # Generate panel, backtest, elasticity, artifacts and report
-  └── demo_uncertainty.py       # Compare uncertainty methods on one decision
-artifacts/  reports/            # Generated outputs (committed so the app runs without re-running)
-sql/schema_and_eda.sql          # SQLite schema & owner-block-adjusted rollup query
-tests/                          # Engine, CFE, forecasting, elasticity and integration tests
+  └── demo_uncertainty.py       # Compare block-bootstrap vs. independent-normal uncertainty
+artifacts/  reports/            # Precomputed outputs (committed so the app starts immediately)
+sql/schema_and_eda.sql          # SQLite/DuckDB schema & owner-block-adjusted rollup query
+tests/                          # Engine, CFE, transforms, forecasting, elasticity & UI tests
 .github/workflows/tests.yml     # GitHub Actions CI pipeline
 ```
 

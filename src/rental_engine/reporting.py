@@ -1,9 +1,14 @@
-"""Markdown report for the walk-forward forecasting and elasticity results (synthetic demo panel)."""
+"""
+Markdown report builder for walk-forward forecasting and price-elasticity results.
+
+Consumes the structured dicts produced by `forecasting.run_pipeline()` and
+`elasticity.estimate_elasticity()` and emits `reports/forecast_report.md`.
+"""
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
 
-MODEL_LABELS = {
+MODEL_LABELS: Dict[str, str] = {
     "seasonal_naive": "Seasonal naive (same month last year)",
     "seasonal_naive_drift": "Seasonal naive + recent YoY drift",
     "unit_month_mean": "Unit x calendar-month mean",
@@ -13,25 +18,28 @@ MODEL_LABELS = {
 
 
 def _metric_table(result: Dict[str, object], var: str, bucket: str) -> str:
+    """Format one Markdown accuracy table (MAE, RMSE, skill vs. best baseline)."""
     unit = "MXN" if var == "adr" else "occupancy pts"
     scale = 1.0 if var == "adr" else 100.0
     rows = result["metrics"][var][bucket]
-    lines = [f"| Model | MAE ({unit}) | RMSE ({unit}) | Skill vs best baseline |", "|---|---:|---:|---:|"]
-    for name in MODEL_LABELS:
+    lines = [
+        f"| Model | MAE ({unit}) | RMSE ({unit}) | Skill vs best baseline |",
+        "|---|---:|---:|---:|",
+    ]
+    for name, label in MODEL_LABELS.items():
         if name in rows:
-            d = rows[name]
+            m = rows[name]
             lines.append(
-                f"| {MODEL_LABELS[name]} | {d['mae'] * scale:.2f} | {d['rmse'] * scale:.2f} | {d['skill_vs_best_baseline'] * 100:+.1f}% |"
+                f"| {label} | {m['mae'] * scale:.2f} | {m['rmse'] * scale:.2f} | "
+                f"{m['skill_vs_best_baseline'] * 100:+.1f}% |"
             )
     return "\n".join(lines)
 
 
-def build_report(result: Dict[str, object], elasticity: Dict[str, object]) -> str:
+def _setup_section(result: Dict[str, object]) -> List[str]:
+    """Render report header, synthetic-data notice, and experimental setup bullets."""
     chosen = result["chosen_models"]
-    bias = result["residual_bias_removed_transformed_scale"]
-    floor = result.get("occupancy_mae_noise_floor")
-    e = elasticity
-    lines = [
+    return [
         "# Walk-forward forecasting & elasticity report",
         "",
         "> **Synthetic data.** Everything below is computed on the synthetic demo panel "
@@ -48,6 +56,13 @@ def build_report(result: Dict[str, object], elasticity: Dict[str, object]) -> st
         f"- Model chosen per target by lowest overall RMSE on the transformed scale: ADR = **{MODEL_LABELS[chosen['adr']]}**, "
         f"occupancy = **{MODEL_LABELS[chosen['occ']]}**.",
         "",
+    ]
+
+
+def _backtest_section(result: Dict[str, object]) -> List[str]:
+    """Render overall ADR/occupancy accuracy tables, noise floor, and horizon-bucket skill."""
+    floor = result.get("occupancy_mae_noise_floor")
+    lines = [
         "## Backtest results (all horizons)",
         "",
         "### Nightly ADR",
@@ -64,23 +79,40 @@ def build_report(result: Dict[str, object], elasticity: Dict[str, object]) -> st
             "Errors close to that are as good as this data allows.",
             "",
         ]
-    lines += ["### By horizon (skill vs the best baseline, RMSE on the transformed scale)", "",
-              "| Target | Horizon | Best model skill |", "|---|---|---:|"]
+
+    lines += [
+        "### By horizon (skill vs the best baseline, RMSE on the transformed scale)",
+        "",
+        "| Target | Horizon | Best model skill |",
+        "|---|---|---:|",
+    ]
     for var, label in (("adr", "ADR"), ("occ", "Occupancy")):
         for bucket in ("h1-3", "h4-6", "h7-12"):
             rows = result["metrics"][var][bucket]
             ml = {k: v for k, v in rows.items() if k in ("random_forest", "gradient_boosting")}
             if ml:
-                best = max(ml.items(), key=lambda kv: kv[1]["skill_vs_best_baseline"])
-                lines.append(f"| {label} | {bucket} | {MODEL_LABELS[best[0]]}: {best[1]['skill_vs_best_baseline'] * 100:+.1f}% |")
+                best_name, best_metrics = max(ml.items(), key=lambda kv: kv[1]["skill_vs_best_baseline"])
+                lines.append(
+                    f"| {label} | {bucket} | {MODEL_LABELS[best_name]}: "
+                    f"{best_metrics['skill_vs_best_baseline'] * 100:+.1f}% |"
+                )
+
     lines += [
         "",
         "**Reading this honestly:** on a small panel whose structure is seasonality plus unit effects plus "
         "unforecastable shocks, a unit x calendar-month average is hard to beat. Positive skill means the model "
         "beat the best baseline; negative means it did not.",
         "",
+    ]
+    return lines
+
+
+def _uncertainty_section(result: Dict[str, object]) -> List[str]:
+    """Render block-bootstrap residual centering and dependence notes."""
+    bias = result["residual_bias_removed_transformed_scale"]
+    return [
         "## Uncertainty used by the Monte Carlo",
-        f"- Out-of-fold residuals of the chosen models are saved (`artifacts/oof_residuals.csv`).",
+        "- Out-of-fold residuals of the chosen models are saved (`artifacts/oof_residuals.csv`).",
         f"- Mean residual removed before bootstrapping (transformed scale): ADR {bias['adr']:+.3f}, occupancy {bias['occ']:+.3f}. "
         "Centering keeps the bootstrap from importing a bias specific to the backtest window.",
         "- The simulator resamples WINDOWS of consecutive-horizon residuals (block bootstrap), so the dependence between "
@@ -89,6 +121,13 @@ def build_report(result: Dict[str, object], elasticity: Dict[str, object]) -> st
         "(discretionary price changes lower occupancy), which narrows the revenue distribution; real data may differ. "
         "`python scripts/demo_uncertainty.py` shows the effect on one decision.",
         "",
+    ]
+
+
+def _elasticity_section(elasticity: Dict[str, object]) -> List[str]:
+    """Render naive vs. fixed-effects price-response comparison table."""
+    e = elasticity
+    return [
         "## Price elasticity of occupancy",
         "Model: logit(occupancy) = fixed effects + beta * log(ADR). The generator's true beta is "
         f"**{e['true_value']}**.",
@@ -107,6 +146,12 @@ def build_report(result: Dict[str, object], elasticity: Dict[str, object]) -> st
         f"At the panel's mean occupancy ({e['mean_occupancy']:.0%}) the implied price elasticity of the occupancy "
         f"rate is about {e['implied_occupancy_price_elasticity_at_mean_occ']}.",
         "",
+    ]
+
+
+def _limitations_section() -> List[str]:
+    """Render methodological caveats and limitations."""
+    return [
         "## Limitations",
         "- Synthetic data: the generator is simple (seasonality, unit effects, one market shock). Real markets have "
         "events, competitor supply, and lead-time effects that are not modelled.",
@@ -115,4 +160,15 @@ def build_report(result: Dict[str, object], elasticity: Dict[str, object]) -> st
         "- Residual blocks come from one backtest run; with real data, use more history and check stability.",
         "",
     ]
+
+
+def build_report(result: Dict[str, object], elasticity: Dict[str, object]) -> str:
+    """Assemble the full Markdown backtest & elasticity report."""
+    lines = (
+        _setup_section(result)
+        + _backtest_section(result)
+        + _uncertainty_section(result)
+        + _elasticity_section(elasticity)
+        + _limitations_section()
+    )
     return "\n".join(lines)

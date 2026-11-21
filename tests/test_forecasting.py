@@ -2,18 +2,12 @@
 Tests for the walk-forward forecasting pipeline, the elasticity estimator, the residual-block
 bootstrap, and its integration with the Monte Carlo engine (all on SYNTHETIC data).
 """
-import sys
 import unittest
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
-from src.rental_engine import (  # noqa: E402
+from src.rental_engine import (
     UserCostInputs,
     elasticity,
     forecast_service,
@@ -22,18 +16,24 @@ from src.rental_engine import (  # noqa: E402
     synthetic_panel,
 )
 
-FEATURE_COLS = forecasting.FEATURES + ["um_adr", "um_occ"]
-
 
 def _costs() -> UserCostInputs:
     return UserCostInputs(
-        unit_id="UNIT_A_PLAYA", contract_months=3, monthly_lease_offer_mxn=26000.0, hoa_monthly_mxn=3100.0,
-        wifi_gas_water_monthly_mxn=1100.0, cleaning_cost_per_stay_mxn=700.0, avg_stay_nights=4.0,
-        airbnb_fee_pct=0.18, facebook_direct_share=0.60, winter_cfe_monthly_mxn=1600.0, summer_cfe_monthly_mxn=6000.0,
+        unit_id="UNIT_A_PLAYA",
+        contract_months=3,
+        monthly_lease_offer_mxn=26000.0,
+        hoa_monthly_mxn=3100.0,
+        wifi_gas_water_monthly_mxn=1100.0,
+        cleaning_cost_per_stay_mxn=700.0,
+        avg_stay_nights=4.0,
+        airbnb_fee_pct=0.18,
+        facebook_direct_share=0.60,
+        winter_cfe_monthly_mxn=1600.0,
+        summer_cfe_monthly_mxn=6000.0,
     )
 
 
-def _forecasts(n=3):
+def _forecasts(n: int = 3):
     return [
         {"month_num": m, "pred_adr_mxn": 1800.0, "pred_occ_rate": 0.55, "adr_std_mxn": 250.0, "occ_std": 0.10}
         for m in range(1, n + 1)
@@ -64,13 +64,13 @@ class TestNoLookAhead(unittest.TestCase):
         p1, p2 = forecasting.build_pairs(panel), forecasting.build_pairs(tampered)
         r1 = p1[p1["origin"] == origin].reset_index(drop=True)
         r2 = p2[p2["origin"] == origin].reset_index(drop=True)
-        pd.testing.assert_frame_equal(r1[FEATURE_COLS], r2[FEATURE_COLS])
+        pd.testing.assert_frame_equal(r1[forecasting.FEATURES], r2[forecasting.FEATURES])
 
         models = ("seasonal_naive", "unit_month_mean", "gradient_boosting")
         o1 = forecasting.walk_forward(p1[p1["y_adr"].notna()], [origin], models=models, n_estimators=20)
         o2 = forecasting.walk_forward(p2[p2["y_adr"].notna()], [origin], models=models, n_estimators=20)
         np.testing.assert_allclose(o1["pred_t"].to_numpy(), o2["pred_t"].to_numpy())
-        # ...while the realised targets do differ, so the check is not vacuous.
+        # ...while the realized targets do differ, so the leak check is non-vacuous.
         self.assertFalse(np.allclose(o1["actual_t"].to_numpy(), o2["actual_t"].to_numpy()))
 
 
@@ -92,7 +92,8 @@ class TestResidualBlocksAndService(unittest.TestCase):
         panel = synthetic_panel.generate_panel(seed=11, n_months=30)
         cls.out = forecasting.run_pipeline(panel, n_estimators=15, first_test_origin=24)
         cls.art = forecast_service.ForecastArtifacts(
-            forecasts=cls.out["forecasts"], residuals=cls.out["residuals"],
+            forecasts=cls.out["forecasts"],
+            residuals=cls.out["residuals"],
             meta={"last_observed_month": cls.out["result"]["last_observed_month"]},
         )
 
@@ -101,7 +102,7 @@ class TestResidualBlocksAndService(unittest.TestCase):
         self.assertEqual(set(f["h"]), set(range(1, 13)))
         self.assertEqual(len(f), f["unit_id"].nunique() * 12)
         self.assertIn(self.out["result"]["chosen_models"]["adr"], forecasting.ALL_MODELS)
-        self.assertAlmostEqual(self.out["residuals"]["res_adr"].mean(), 0.0, places=6)  # centred
+        self.assertAlmostEqual(self.out["residuals"]["res_adr"].mean(), 0.0, places=6)  # centered
 
     def test_window_mapping(self):
         self.assertEqual(forecast_service.window_start_month("2025-12", [5, 6, 7, 8, 9, 10]), "2026-05")
@@ -118,6 +119,17 @@ class TestResidualBlocksAndService(unittest.TestCase):
         self.assertGreater(blocks.shape[0], 10)
         with self.assertRaises(ValueError):
             forecast_service.forecast_window(self.art, unit, str(pd.Period(last, freq="M") + 11), 6)
+
+    def test_forecast_calendar_window_handles_year_end_wrap(self):
+        unit = self.art.forecasts["unit_id"].iloc[0]
+        # `last_observed_month` is 2024-06, so [5, 6, 7] starts at h=11 and wraps past h=12.
+        monthly, blocks, wrapped = forecast_service.forecast_calendar_window(
+            self.art, unit, [5, 6, 7]
+        )
+        self.assertEqual([m["month_num"] for m in monthly], [5, 6, 7])
+        self.assertTrue(wrapped)
+        self.assertIsNotNone(blocks)
+        self.assertEqual(blocks.shape[1:], (3, 2))
 
 
 class TestEngineIntegration(unittest.TestCase):

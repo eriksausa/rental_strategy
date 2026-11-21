@@ -14,7 +14,13 @@ data/raw/*.json
 data/private/
 !data/private/.gitkeep
 
-# OS/IDE files
+# Local legacy archive & temporary transfer files
+legacy/
+*.patch
+*.zip
+
+# OS/IDE & test caches
 .DS_Store
 .vscode/
 .pytest_cache/
+.ruff_cache/

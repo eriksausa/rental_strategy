@@ -1,18 +1,15 @@
 """
-Unit tests for the Rental Strategy Optimizer core logic (`src/rental_engine`).
-Compatible with both `python -m unittest discover -s tests -v` and `pytest -v`.
+Unit tests for the Rental Strategy Optimizer core domain logic (`src/rental_engine`)
+and UI preset configuration (`src/ui`).
+
+Compatible with both `pytest -v` and `python -m unittest discover -s tests -v`.
 """
-import sys
 import unittest
-from pathlib import Path
-import pandas as pd
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+import numpy as np
 
-from src.rental_engine import (  # noqa: E402
-    DEFAULT_ASSUMPTIONS,
+from src.rental_engine import (
+    PORTFOLIO_UNITS,
     UserCostInputs,
     compute_blended_ota_drag,
     compute_break_even_occupancy,
@@ -20,16 +17,14 @@ from src.rental_engine import (  # noqa: E402
     days_in_month,
     estimate_cfe_monthly_bill,
     evaluate_12m_dac_trajectory,
+    inv_logit,
     is_dac_reclassified,
+    logit,
     parse_facebook_rental_post,
     simulate_lease_vs_str,
+    smooth_occupancy,
 )
-from src.rental_engine.data import load_training_dataframe  # noqa: E402
-from src.rental_engine.models import (  # noqa: E402
-    chronological_train_test_split,
-    predict_unit_monthly_forecasts,
-    train_and_evaluate_models,
-)
+from src.ui.presets import SCENARIO_PRESETS
 
 
 class TestRentalStrategyOptimizer(unittest.TestCase):
@@ -47,7 +42,7 @@ class TestRentalStrategyOptimizer(unittest.TestCase):
         self.assertAlmostEqual(compute_rolling_12m_avg_kwh(history_into_dac), 425.0, places=2)
         self.assertTrue(is_dac_reclassified(history_into_dac, tariff="1B"))
 
-        # Even in a winter month (is_summer_month=False) with 260 kWh usage, a meter whose
+        # Even in winter (is_summer_month=False) with 260 kWh usage, a meter whose
         # 12-month rolling average is > 400 kWh stays billed at the unsubsidized DAC rate:
         winter_dac_bill = estimate_cfe_monthly_bill(
             kwh_used=260.0,
@@ -136,33 +131,13 @@ class TestRentalStrategyOptimizer(unittest.TestCase):
         self.assertIn("May (31d)", months_col[0])
         self.assertIn("Jun (30d)", months_col[1])
 
-    def test_chronological_split_prevents_future_leakage(self):
-        df = pd.DataFrame(
-            {
-                "unit_id": ["UNIT_A_PLAYA"] * 6,
-                "year_month": ["2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08"],
-                "month_num": [3, 4, 5, 6, 7, 8],
-                "adr_mxn": [1800, 1650, 1300, 1250, 1400, 1350],
-                "occupancy_rate": [0.78, 0.70, 0.52, 0.48, 0.58, 0.54],
-            }
-        )
-        train_df, test_df = chronological_train_test_split(df, cutoff_year_month="2025-06")
-        self.assertEqual(train_df["year_month"].max(), "2025-06")
-        self.assertEqual(test_df["year_month"].min(), "2025-07")
-
-    def test_models_actually_trained_and_produce_backtest_residuals(self):
-        df = load_training_dataframe()
-        bundle = train_and_evaluate_models(df, cutoff_year_month="2025-06")
-        self.assertEqual(bundle.train_rows, 90)
-        self.assertEqual(bundle.test_rows, 30)
-        self.assertGreater(bundle.adr_residual_std_mxn, 10.0)
-        self.assertGreater(bundle.occ_residual_std, 0.01)
-        self.assertGreaterEqual(len(bundle.backtest_metrics_df), 4)
-
-        forecasts = predict_unit_monthly_forecasts(bundle, "UNIT_TULUM", [5, 6, 7])
-        self.assertEqual(len(forecasts), 3)
-        self.assertEqual(forecasts[0]["adr_std_mxn"], bundle.adr_residual_std_mxn)
-        self.assertEqual(forecasts[0]["occ_std"], bundle.occ_residual_std)
+    def test_transforms_roundtrip_and_boundary_smoothing(self):
+        probs = np.array([0.1, 0.5, 0.85])
+        np.testing.assert_allclose(inv_logit(logit(probs)), probs, atol=1e-12)
+        # Continuity smoothing keeps 0% and 100% occupancy strictly inside (0, 1)
+        smoothed = smooth_occupancy(np.array([0.0, 1.0]), np.array([30.0, 31.0]))
+        self.assertTrue(np.all((smoothed > 0.0) & (smoothed < 1.0)))
+        self.assertTrue(np.all(np.isfinite(logit(smoothed))))
 
     def test_facebook_post_parser_extracts_fields(self):
         post = "Available May 1st! 2BR apartment in Aldea Zama. $25,000 MXN/mes + CFE electric."
@@ -171,6 +146,13 @@ class TestRentalStrategyOptimizer(unittest.TestCase):
         self.assertEqual(parsed["neighborhood"], "Aldea Zama")
         self.assertEqual(parsed["asking_monthly_mxn"], 25000.0)
         self.assertTrue(parsed["tenant_pays_cfe"])
+
+    def test_ui_presets_reference_valid_portfolio_units(self):
+        self.assertGreaterEqual(len(SCENARIO_PRESETS), 3)
+        for preset in SCENARIO_PRESETS:
+            self.assertIn(preset.unit_id, PORTFOLIO_UNITS)
+            self.assertIn(preset.contract_months, (3, 6))
+            self.assertTrue(1 <= preset.start_month <= 12)
 
 
 if __name__ == "__main__":
