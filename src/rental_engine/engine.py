@@ -88,9 +88,15 @@ def simulate_lease_vs_str(
     assumptions: Assumptions = DEFAULT_ASSUMPTIONS,
     prior_11m_kwh: Sequence[float] | None = None,
     window_monthly_kwh: Sequence[float] | None = None,
+    residual_blocks: np.ndarray | None = None,
 ) -> Dict[str, object]:
     """
     Runs a Monte Carlo cash-flow simulation over the 3M or 6M lease window.
+
+    If `residual_blocks` (shape: n_blocks x n_months x 2) is given, each simulation draws one
+    whole block of backtest forecast errors (log-ADR, log-odds occupancy) and applies it to the
+    point forecasts. This keeps month-to-month persistence and the ADR/occupancy dependence seen
+    in the backtest ("block bootstrap"). Without it, months are drawn as independent normals.
 
     Each entry in `monthly_forecasts` provides:
       - month_num (1..12)
@@ -127,6 +133,15 @@ def simulate_lease_vs_str(
             assumptions=assumptions,
         )
 
+    use_blocks = residual_blocks is not None
+    if use_blocks:
+        residual_blocks = np.asarray(residual_blocks, dtype=float)
+        if residual_blocks.ndim != 3 or residual_blocks.shape[1] != n_months or residual_blocks.shape[2] != 2:
+            raise ValueError(
+                f"residual_blocks must have shape (n_blocks, {n_months}, 2); got {residual_blocks.shape}."
+            )
+        block_idx = rng.integers(0, residual_blocks.shape[0], size=n_runs)
+
     sim_str_totals = np.zeros(n_runs, dtype=float)
     break_even_occs: List[float] = []
     monthly_breakdown: List[Dict[str, object]] = []
@@ -154,15 +169,25 @@ def simulate_lease_vs_str(
         adr_std = max(float(m.get("adr_std_mxn", assumptions.fallback_adr_std_mxn)), 1.0)
         occ_std = max(float(m.get("occ_std", assumptions.fallback_occ_std)), 0.01)
 
-        adr_samples = np.maximum(
-            rng.normal(loc=float(m["pred_adr_mxn"]), scale=adr_std, size=n_runs),
-            assumptions.min_sampled_adr_mxn,
-        )
-        occ_samples = np.clip(
-            rng.normal(loc=float(m["pred_occ_rate"]), scale=occ_std, size=n_runs),
-            assumptions.min_sampled_occ_rate,
-            assumptions.max_sampled_occ_rate,
-        )
+        if use_blocks:
+            res = residual_blocks[block_idx, idx, :]
+            adr_samples = np.maximum(float(m["pred_adr_mxn"]) * np.exp(res[:, 0]), assumptions.min_sampled_adr_mxn)
+            p0 = float(np.clip(m["pred_occ_rate"], 1e-4, 1.0 - 1e-4))
+            occ_samples = np.clip(
+                1.0 / (1.0 + np.exp(-(np.log(p0 / (1.0 - p0)) + res[:, 1]))),
+                assumptions.min_sampled_occ_rate,
+                assumptions.max_sampled_occ_rate,
+            )
+        else:
+            adr_samples = np.maximum(
+                rng.normal(loc=float(m["pred_adr_mxn"]), scale=adr_std, size=n_runs),
+                assumptions.min_sampled_adr_mxn,
+            )
+            occ_samples = np.clip(
+                rng.normal(loc=float(m["pred_occ_rate"]), scale=occ_std, size=n_runs),
+                assumptions.min_sampled_occ_rate,
+                assumptions.max_sampled_occ_rate,
+            )
 
         occupied_nights = float(month_days) * occ_samples
         gross_rev = occupied_nights * adr_samples
@@ -277,6 +302,7 @@ def simulate_lease_vs_str(
         )
 
     return {
+        "uncertainty_method": "block_bootstrap" if use_blocks else "independent_normal",
         "sim_str_totals": sim_str_totals,
         "monthly_df": pd.DataFrame(monthly_breakdown),
         "cfe_trajectory": cfe_trajectory,

@@ -10,6 +10,9 @@ Run locally with:
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -24,10 +27,12 @@ from src.rental_engine.assumptions import (
 )
 from src.rental_engine.cfe import evaluate_12m_dac_trajectory
 from src.rental_engine.data import load_training_dataframe
+from src.rental_engine import forecast_service
 from src.rental_engine.engine import (
     UserCostInputs,
     simulate_lease_vs_str,
 )
+from src.rental_engine.reporting import MODEL_LABELS
 from src.rental_engine.fb_parser import parse_facebook_rental_post
 from src.rental_engine.models import (
     TrainedModelBundle,
@@ -45,6 +50,18 @@ def get_trained_model_bundle() -> TrainedModelBundle:
     """
     df = load_training_dataframe()
     return train_and_evaluate_models(df, cutoff_year_month="2025-06")
+
+
+ROOT_DIR = Path(__file__).resolve().parent
+
+
+@st.cache_resource(show_spinner=False)
+def get_forecast_artifacts():
+    """Walk-forward forecasts and backtest residual blocks from `scripts/run_forecast_pipeline.py`."""
+    try:
+        return forecast_service.load_artifacts(ROOT_DIR)
+    except (FileNotFoundError, KeyError, ValueError):
+        return None
 
 
 # ==============================================================================
@@ -222,6 +239,22 @@ with st.sidebar:
         index=default_dur_idx,
         horizontal=True,
     )
+    forecast_artifacts = get_forecast_artifacts()
+    use_walk_forward = False
+    if forecast_artifacts is not None:
+        use_walk_forward = st.toggle(
+            "Pronósticos walk-forward + incertidumbre por bootstrap de bloques"
+            if lang == "es"
+            else "Walk-forward forecasts + block-bootstrap uncertainty",
+            value=True,
+            help=(
+                "Usa el panel sintético de 12 unidades x 48 meses, backtest de origen móvil y bloques de residuos "
+                "(persistencia entre meses). Desactívalo para ver el método original (corte único + normales independientes)."
+                if lang == "es"
+                else "Uses the 12-unit x 48-month synthetic panel, a rolling-origin backtest and blocks of backtest "
+                "residuals (month-to-month persistence). Turn off to see the original single-split, independent-normal method."
+            ),
+        )
     lease_offer_mxn = st.number_input(
         "Oferta Mensual del Inquilino (MXN)" if lang == "es" else "Tenant Monthly Offer (MXN)",
         min_value=5000.0,
@@ -334,6 +367,31 @@ months_window = [((start_month - 1 + i) % 12) + 1 for i in range(contract_months
 forecasts = predict_unit_monthly_forecasts(
     model_bundle, selected_unit_id, months_window, lang=lang
 )
+residual_blocks = None
+forecast_note = None
+if use_walk_forward and forecast_artifacts is not None:
+    start_ym = forecast_service.window_start_month(
+        str(forecast_artifacts.meta["last_observed_month"]), months_window
+    )
+    if start_ym is None:
+        forecast_note = (
+            "Esta ventana de contrato queda fuera del horizonte walk-forward de 12 meses; "
+            "se usan los pronósticos de corte único con normales independientes."
+            if lang == "es"
+            else "This lease window falls outside the 12-month walk-forward horizon; "
+            "using the single-split forecasts with independent normal draws."
+        )
+    else:
+        try:
+            wf_forecasts, residual_blocks = forecast_service.forecast_window(
+                forecast_artifacts, selected_unit_id, start_ym, len(months_window)
+            )
+            for wf, base in zip(wf_forecasts, forecasts):
+                wf["month_name"] = base["month_name"]
+            forecasts = wf_forecasts
+        except ValueError as exc:
+            forecast_note = str(exc)
+            residual_blocks = None
 
 if use_kwh_mode:
     prior_11m_kwh = [float(prior_avg_kwh)] * 11
@@ -362,6 +420,7 @@ sim_results = simulate_lease_vs_str(
     lang=lang,
     prior_11m_kwh=prior_11m_kwh,
     window_monthly_kwh=window_monthly_kwh,
+    residual_blocks=residual_blocks,
 )
 
 # ==============================================================================
@@ -385,6 +444,21 @@ else:
 tab_sim, tab_story, tab_ml, tab_fb = st.tabs(tab_titles)
 
 with tab_sim:
+    if forecast_note:
+        st.info(forecast_note)
+    st.caption(
+        (
+            "Método de incertidumbre: **bootstrap de bloques de residuos (walk-forward)**"
+            if sim_results["uncertainty_method"] == "block_bootstrap"
+            else "Método de incertidumbre: **normales independientes (corte único)**"
+        )
+        if lang == "es"
+        else (
+            "Uncertainty method: **block bootstrap of walk-forward residuals**"
+            if sim_results["uncertainty_method"] == "block_bootstrap"
+            else "Uncertainty method: **independent normals (single split)**"
+        )
+    )
     st.subheader(
         f"{'Evaluación para' if lang == 'es' else 'Decision Evaluation:'} {unit_info[name_key]}"
     )
@@ -663,6 +737,68 @@ with tab_ml:
         "residual standard deviations used in Monte Carlo, rather than claiming accuracy on private booking records."
     )
     st.dataframe(model_bundle.backtest_metrics_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.subheader(
+        "Backtest de origen móvil y elasticidad de precio (panel sintético)"
+        if lang == "es"
+        else "Rolling-origin backtest & price elasticity (synthetic panel)"
+    )
+    wf_path = ROOT_DIR / "reports" / "forecast_metrics.json"
+    if wf_path.exists():
+        wf = json.loads(wf_path.read_text(encoding="utf-8"))
+        rows = []
+        for var, label, scale in (("adr", "ADR (MXN)", 1.0), ("occ", "Occupancy (pts)", 100.0)):
+            for model_name, d in wf["metrics"][var]["all"].items():
+                rows.append(
+                    {
+                        "Target": label,
+                        "Model": MODEL_LABELS.get(model_name, model_name),
+                        "MAE": round(d["mae"] * scale, 2),
+                        "RMSE": round(d["rmse"] * scale, 2),
+                        "Skill vs best baseline (%)": round(d["skill_vs_best_baseline"] * 100.0, 1),
+                    }
+                )
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        floor = wf.get("occupancy_mae_noise_floor")
+        st.caption(
+            (
+                f"{wf['n_units']} unidades x {wf['n_months']} meses sintéticos; origen móvil con horizontes 1-12 meses. "
+                f"Piso de ruido de ocupación: MAE ≈ {floor * 100:.1f} pts (un pronóstico perfecto de la probabilidad latente). "
+                "Skill positivo = supera al mejor modelo base."
+                if lang == "es"
+                else f"{wf['n_units']} synthetic units x {wf['n_months']} months; rolling-origin with 1-12 month horizons. "
+                f"Occupancy noise floor: MAE ≈ {floor * 100:.1f} pts (a perfect forecast of the latent probability). "
+                "Positive skill = beats the best baseline."
+            )
+            if floor is not None
+            else ""
+        )
+        el = wf["elasticity"]
+        el_df = pd.DataFrame(
+            [
+                {"Specification": "Naive pooled OLS", "beta": f"{el['naive_pooled_ols']}"},
+                {"Specification": "Unit + calendar-month + trend controls", "beta": f"{el['unit_month_trend_controls']}"},
+                {"Specification": "Unit + year-month fixed effects", "beta": f"{el['twfe_unit_and_year_month']}"},
+                {
+                    "Specification": "Unit x calendar-month + year-month fixed effects (headline)",
+                    "beta": f"{el['headline_estimate']} (95% CI {el['headline_ci95_bootstrap'][0]} to {el['headline_ci95_bootstrap'][1]})",
+                },
+                {"Specification": "True value in the generator", "beta": f"{el['true_value']}"},
+            ]
+        )
+        st.dataframe(el_df, use_container_width=True, hide_index=True)
+        st.caption(
+            "La regresión ingenua tiene el signo equivocado (temporada alta = precio y ocupación altos); los efectos fijos recuperan el valor verdadero."
+            if lang == "es"
+            else "The naive regression has the wrong sign (high season means both high prices and high occupancy); fixed effects recover the true value."
+        )
+    else:
+        st.info(
+            "Ejecuta `python scripts/run_forecast_pipeline.py` para generar el reporte."
+            if lang == "es"
+            else "Run `python scripts/run_forecast_pipeline.py` to generate the report."
+        )
 
 with tab_fb:
     st.subheader(
