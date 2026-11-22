@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS market_benchmarks (
 
 -- ============================================================================
 -- Analytical Query 1: Roll up raw portfolio reservation list into monthly ADR
--- and true available occupancy (excluding family/owner maintenance blocks).
+-- and true available occupancy (excluding owner and maintenance blocks).
 -- ============================================================================
 -- SELECT
 --     unit_id,

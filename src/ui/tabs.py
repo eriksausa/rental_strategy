@@ -178,7 +178,7 @@ def render_cfe_assumptions_tab(artifacts: ForecastArtifacts, lang: str) -> None:
             pick(
                 en="""
                 #### 1. The Operational Problem in the Riviera Maya
-                This project evaluates **4 anonymized portfolio units in the Riviera Maya** (modeled on a family-run rental operation, with synthetic history for privacy):
+                This project evaluates **4 anonymized portfolio units in the Riviera Maya** (modeled on a real rental business, with synthetic history for privacy):
                 - **Playa del Carmen**: **Unit A Playa** and **Unit B Playa** (**1BR/1BA**) and **Unit C Playa** (**2BR/2BA**).
                 - **Tulum**: **Unit Tulum** (**1BR/1BA**, anchored to Tulum's ~46% market-wide annual occupancy per **AirDNA 2026**).
 
@@ -186,7 +186,7 @@ def render_cfe_assumptions_tab(artifacts: ForecastArtifacts, lang: str) -> None:
                 """,
                 es="""
                 #### 1. El Problema Operativo en la Riviera Maya
-                Este proyecto evalúa **4 departamentos ilustrativos en la Riviera Maya** (basados en la estructura de un negocio familiar real, anonimizados para este demo público):
+                Este proyecto evalúa **4 departamentos ilustrativos en la Riviera Maya** (basados en la estructura de un negocio real de rentas, anonimizados para este demo público):
                 - **Playa del Carmen**: **Unidad A Playa** y **Unidad B Playa** (**1 Rec / 1 Baño**) y **Unidad C Playa** (**2 Rec / 2 Baños**).
                 - **Tulum**: **Unidad Tulum** (**1 Rec / 1 Baño**, anclada al ~46% de ocupación media anual del mercado de Tulum según **AirDNA 2026**).
 
